@@ -51,29 +51,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Report toolchain
+      - name: Probe toolchain and UWP compile/link (results shown as annotations)
         shell: pwsh
         run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          & $vswhere -all -products * -format json | Out-String | Write-Host
-          Write-Host "--- Windows SDKs"
-          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" | Select-Object Name
-          Write-Host "--- UWP import lib"
-          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Lib" -Recurse -Filter WindowsApp.lib |
-            Select-Object -First 5 FullName
-          Write-Host "--- clang"
-          Get-Command clang-cl, clang -ErrorAction SilentlyContinue | Select-Object Source
-          clang-cl --version
+          $ErrorActionPreference = 'Continue'
+          $summary = New-Object System.Collections.Generic.List[string]
+          function Note($title, $text) {
+            $t = ($text | Out-String).Trim()
+            if ($t.Length -gt 1500) { $t = $t.Substring(0, 1500) + ' ...(truncated)' }
+            Write-Host "=== $title`n$t"
+            $summary.Add("### $title`n``````n$t`n``````")
+            $flat = $t -replace "`r?`n", '%0A'
+            Write-Host "::notice title=$title::$flat"
+          }
 
-      - name: Compile and link a UWP-flavoured program with clang-cl
-        shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" uwp 2>nul || call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          echo #include ^<windows.h^>> probe.cpp
-          echo #include ^<cstdio^>>> probe.cpp
-          echo int main(){ std::printf("uwp probe\n"); return 0; }>> probe.cpp
-          clang-cl /std:c++17 /DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0A00 /c probe.cpp
-          if errorlevel 1 exit /b 1
-          link /APPCONTAINER /MACHINE:X64 probe.obj WindowsApp.lib
-          if errorlevel 1 exit /b 1
-          echo probe linked
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          Note 'Visual Studio' ("path: $vs`n" + (& $vswhere -latest -products * -property catalog_productDisplayVersion))
+
+          $inc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" -ErrorAction SilentlyContinue | ForEach-Object Name
+          Note 'Windows SDK versions' ($inc -join ', ')
+
+          $wapp = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Lib" -Recurse -Filter WindowsApp.lib -ErrorAction SilentlyContinue | Select-Object -First 3 -ExpandProperty FullName
+          Note 'WindowsApp.lib' ($wapp -join "`n")
+
+          $clang = Get-Command clang-cl -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+          Note 'clang-cl' ("$clang`n" + (& clang-cl --version 2>&1))
+
+          # Import the MSVC x64 environment (include/lib paths) into this session.
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          Note 'vcvars64.bat exists' (Test-Path $vcvars)
+          cmd /c "`"$vcvars`" >nul && set" | ForEach-Object {
+            if ($_ -match '^(.*?)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] }
+          }
+
+          Set-Content probe.cpp "#include <windows.h>`n#include <cstdio>`nint main(){ std::printf(`"uwp probe\n`"); return 0; }"
+          $c = & clang-cl /std:c++17 /DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0A00 /c probe.cpp 2>&1
+          $compileOk = ($LASTEXITCODE -eq 0)
+          Note "clang-cl compile (WINAPI_FAMILY_APP): exit $LASTEXITCODE" $c
+
+          $linkOk = $false
+          if ($compileOk) {
+            $l = & link /APPCONTAINER /MACHINE:X64 probe.obj WindowsApp.lib 2>&1
+            $linkOk = ($LASTEXITCODE -eq 0)
+            Note "link /APPCONTAINER WindowsApp.lib: exit $LASTEXITCODE" $l
+          }
+
+          $summary | Set-Content $env:GITHUB_STEP_SUMMARY
+          if (-not ($compileOk -and $linkOk)) { exit 1 }
