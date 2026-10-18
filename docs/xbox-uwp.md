@@ -18,6 +18,7 @@ built or linked, and nothing runs.
 | `uwp-shim-compile` | every file under `shims/` compiles with clang-cl under `WINAPI_FAMILY_APP` in ES mode | 107 of 108 files clean; `win32/mci_video.cpp` fails only because FFmpeg headers are not on the runner |
 
 | `uwp-game-compile` | the decompiled game sources (`src/`, `main/`, `checks/`: 6,604 files after the build's per-function source selection) compile under the same settings | a full run over all 6,604 files found 2 failures (editor `chdir`, `sleep`), now fixed; the default run samples every 20th file plus those two as regression guards, and is clean |
+| `sdl-uwp-build` | SDL2 builds for UWP (x64 Release) from SDL's own `VisualC-WinRT/SDL-UWP.vcxproj` | builds: `SDL2.dll`, ~1.35 MB, saved as the `sdl2-uwp-x64` artifact. Needs toolset `v145` (the runner has Visual Studio 18); the project's own `v143` is not present there |
 
 The jobs report results as run annotations, and the full logs are attached to each run as
 artifacts. To re-run the game-source check over every file, start the workflow by hand
@@ -78,8 +79,9 @@ Not checked: a full link, or a run, of either mode.
 ## Remaining work (in rough order)
 
 1. **Build the libraries for UWP.** The build compiles SDL2, SDL2_ttf and FFmpeg from source
-   for MSYS2/mingw (`cmake/bundledlibs.cmake`); none of that targets UWP. You need UWP builds of
-   SDL2 (its WinRT port), SDL2_ttf, FFmpeg (for the FMV) and ANGLE.
+   for MSYS2/mingw (`cmake/bundledlibs.cmake`); none of that targets UWP. SDL2 (its WinRT port)
+   now builds in CI (see above). Still needed: UWP builds of SDL2_ttf (which needs FreeType),
+   FFmpeg (for the FMV) and ANGLE (SDL's WinRT backend loads ANGLE's `libEGL`/`libGLESv2`).
 2. **App shell.** UWP needs a WinRT app entry. SDL2's WinRT support does this with a C++/CX
    project compiled by MSVC (`/ZW`), so the realistic layout is an MSVC shell project that links
    a static library of the game built with `WINAPI_FAMILY_APP`. `packaging/uwp/Package.appxmanifest`
