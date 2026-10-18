@@ -17,16 +17,21 @@ built or linked, and nothing runs.
 | `uwp-probe` | a Windows runner can compile (clang-cl, `WINAPI_FAMILY_APP`) and link (`/APPCONTAINER`, `WindowsApp.lib`) a small program | passes |
 | `uwp-shim-compile` | every file under `shims/` compiles with clang-cl under `WINAPI_FAMILY_APP` in ES mode | 107 of 108 files clean; `win32/mci_video.cpp` fails only because FFmpeg headers are not on the runner |
 
-That job reports results as run annotations, and the full log is attached to the run as the
-`uwp-shim-compile-logs` artifact. It does **not** yet cover the decompiled game sources under
-`src/`, only the platform layer.
+| `uwp-game-compile` | the decompiled game sources (`src/`, `main/`, `checks/`: 6,604 files after the build's per-function source selection) compile under the same settings | a full run over all 6,604 files found 2 failures (editor `chdir`, `sleep`), now fixed; the default run samples every 20th file plus those two as regression guards, and is clean |
+
+The jobs report results as run annotations, and the full logs are attached to each run as
+artifacts. To re-run the game-source check over every file, start the workflow by hand
+(Actions tab, `xbox-uwp`, Run workflow) with `stride` set to `1`; it takes about an hour.
+
+All of this is compile-level only: nothing is linked, and nothing has run.
 
 What it took to get there, for anyone hitting the same errors: the Watcom calling-convention
 macros in `include/system/basetypes.h` were guarded by `_MSC_VER` and are now unconditional; the
 shims' `tell()`/`chsize()` are renamed under MSVC to avoid the UCRT's; `kernel32.cpp` supplies
 `ssize_t`, `S_ISDIR` and friends, 64-bit `off_t`/`lseek`, and uses `GetCurrentProcessId` instead of
 `_getpid` (not available to UWP) when built with the Microsoft toolchain; `dump.cpp` uses
-`_stricmp`. A new `core/data_root` resolves the game's relative paths against the app's local
+`_stricmp`; `watcom.cpp` provides `chdir()` (reports failure; a UWP app cannot change directory) and
+`sleep()` for the Microsoft toolchain. A new `core/data_root` resolves the game's relative paths against the app's local
 folder on UWP (unchanged elsewhere) and is used by the file-open, attribute, delete,
 create-directory and file-search entry points and by `watcom_resolve_fs_path`.
 
@@ -79,8 +84,9 @@ Not checked: a full link, or a run, of either mode.
    project compiled by MSVC (`/ZW`), so the realistic layout is an MSVC shell project that links
    a static library of the game built with `WINAPI_FAMILY_APP`. `packaging/uwp/Package.appxmanifest`
    is a starting template for that shell, not a working one.
-3. **Compiler/toolchain.** The platform layer (`shims/`) now compiles under clang-cl with the UWP
-   API family (see CI status). The decompiled game sources under `src/` have not been tried yet.
+3. **Compiler/toolchain.** Done at compile level: the platform layer and all decompiled game
+   sources compile under clang-cl with the UWP API family (see CI status), apart from the one
+   FFmpeg-dependent shim file that needs FFmpeg's headers. Linking has not been tried.
 4. **Win32 API restrictions.** UWP blocks or removes many Win32 calls the shims currently use or
    will reach for (`SetCurrentDirectory`/`chdir`, `LoadLibrary` of arbitrary files, `CreateWindow`,
    `winmm` pieces, some `kernel32` calls). Each needs checking against the UWP API surface.
