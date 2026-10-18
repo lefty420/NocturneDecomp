@@ -117,6 +117,10 @@ jobs:
           git clone -q --depth 1 -b SDL2 https://github.com/libsdl-org/SDL "$d\sdl"
           git clone -q --depth 1 https://github.com/KhronosGroup/OpenGL-Registry "$d\gl"
           git clone -q --depth 1 https://github.com/KhronosGroup/EGL-Registry "$d\egl"
+          git clone -q --depth 1 -b SDL2 https://github.com/libsdl-org/SDL_ttf "$d\ttf"
+          # Some sources write <SDL2/SDL.h>; give that spelling a home.
+          New-Item -ItemType Directory -Force "$d\inc" | Out-Null
+          Copy-Item "$d\sdl\include" "$d\inc\SDL2" -Recurse
 
       - name: Compile shims under WINAPI_FAMILY_APP
         shell: pwsh
@@ -148,8 +152,8 @@ jobs:
           foreach ($f in $files) {
             $rel = $f.FullName.Substring($R.Length + 1)
             $out = & clang-cl /nologo /TP /std:c++17 /Zs /clang:-Wno-everything `
-              /DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0A00 /DNOCTURNE_GLES=1 /D_CRT_DECLARE_NONSTDC_NAMES=0 `
-              "/I$R\include" "/I$R\shims" "/I$d\sdl\include" "/I$d\gl\api" "/I$d\egl\api" `
+              /DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0A00 /DNOCTURNE_GLES=1 `
+              "/I$R\include" "/I$R\shims" "/I$d\sdl\include" "/I$d\inc" "/I$d\ttf" "/I$d\gl\api" "/I$d\egl\api" `
               $f.FullName 2>&1 | Out-String
             $errs = @($out -split "`r?`n" | Where-Object { $_ -match ': (fatal )?error: ' })
             $perFile += [pscustomobject]@{ File = $rel; Errors = $errs.Count }

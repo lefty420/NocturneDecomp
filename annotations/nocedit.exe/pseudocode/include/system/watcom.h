@@ -284,6 +284,15 @@ extern void __STK(size_t size);
 
 extern void* _memcpy(void* dest, const void* src, size_t count);
 extern void* _memset(void* dest, int value, size_t count);
+#ifdef _MSC_VER
+// The UCRT's <io.h> declares its own, unrelated tell() and chsize() with C linkage and
+// different types. Pull it in first (so its include guard absorbs any later
+// inclusion), then give ours distinct names; the shims' definitions pick the
+// same rename up from this header.
+#include <io.h>
+#define tell nocturne_watcom_tell
+#define chsize nocturne_watcom_chsize
+#endif
 extern long tell(int fd);
 extern int chsize(int fd, long size);
 

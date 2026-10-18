@@ -4,5 +4,6 @@ nocturne_test_suite(shims_watcom
         # Unlike crt.cpp beside it, this adds names rather than taking over the
         # C library's, so a fixture asking the filesystem still gets the truth.
         shims/watcom/watcom.cpp
+        shims/core/data_root.cpp
         shims/core/file_search.cpp
 )

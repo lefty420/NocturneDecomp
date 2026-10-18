@@ -6,6 +6,7 @@
 
 #include "watcom/path.h"
 #include "core/ascii_case.h"
+#include "core/data_root.h"
 
 #include <filesystem>
 #include <string>
@@ -100,5 +101,6 @@ std::string watcom_resolve_fs_path(const char *path) {
     for (char &c : slashed) {
         if (c == '\\') c = '/';
     }
-    return resolve_case_insensitive(slashed);
+    // Relative paths live under the data root (empty except on UWP).
+    return resolve_case_insensitive(nocturne_data_path(slashed.c_str()));
 }

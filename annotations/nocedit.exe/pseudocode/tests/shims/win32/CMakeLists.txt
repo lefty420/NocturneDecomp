@@ -4,6 +4,7 @@
 nocturne_test_suite(shims_win32
     SUBJECTS
         shims/win32/kernel32.cpp
+        shims/core/data_root.cpp
         shims/core/file_search.cpp
         src/globals/globals_610000.cpp
     SUPPORT

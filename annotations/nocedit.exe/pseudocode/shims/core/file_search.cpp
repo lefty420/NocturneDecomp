@@ -6,6 +6,7 @@
 
 #include "core/file_search.h"
 #include "core/ascii_case.h"
+#include "core/data_root.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -75,7 +76,8 @@ std::vector<std::string> nocturne_find_files(const char *filespec) {
     if (filespec == nullptr) return found;
 
     std::string directory, pattern;
-    split(filespec, &directory, &pattern);
+    // Relative specs are resolved against the data root (empty except on UWP).
+    split(nocturne_data_path(filespec).c_str(), &directory, &pattern);
 
     std::error_code ignored;
     const std::filesystem::path where(directory.empty() ? "." : directory);

@@ -28,6 +28,7 @@
 #include "globals/globals_610000.h"
 #include "renderer/builtin_dll.h"
 #include "core/file_search.h"   // nocturne_find_files() — shared with _findfirst
+#include "core/data_root.h"     // nocturne_data_path() — where relative paths live (UWP)
 
 #include <SDL.h>
 
@@ -306,7 +307,8 @@ static HANDLE shim_CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess,
     flags |= O_BINARY;
 #endif
 
-    int fd = open(lpFileName, flags, 0666);
+    const std::string host_path = nocturne_data_path(lpFileName);
+    int fd = open(host_path.c_str(), flags, 0666);
     if (fd < 0) {
         s_lastError = (DWORD)errno;
         return INVALID_HANDLE;
@@ -435,7 +437,7 @@ static BOOL shim_FlushFileBuffers(HANDLE hFile) {
 
 static BOOL shim_DeleteFileA(LPCSTR lpFileName) {
     std::error_code ec;
-    if (std::filesystem::remove(std::filesystem::path(lpFileName), ec)) return 1;
+    if (std::filesystem::remove(std::filesystem::path(nocturne_data_path(lpFileName)), ec)) return 1;
     // remove answers false without an error when there was nothing to remove.
     s_lastError = ec ? (DWORD)ec.value() : (DWORD)2;   // ERROR_FILE_NOT_FOUND
     return 0;
@@ -452,7 +454,7 @@ static BOOL shim_CreateDirectoryA(LPCSTR lpPathName,
 {
     (void)lpSecurityAttributes;
     std::error_code ec;
-    if (std::filesystem::create_directory(std::filesystem::path(lpPathName), ec)) return 1;
+    if (std::filesystem::create_directory(std::filesystem::path(nocturne_data_path(lpPathName)), ec)) return 1;
     // create_directory answers false without an error when the directory is
     // already there, which Win32 reports as a failure with ERROR_ALREADY_EXISTS.
     s_lastError = ec ? (DWORD)ec.value() : (DWORD)183;
@@ -461,7 +463,7 @@ static BOOL shim_CreateDirectoryA(LPCSTR lpPathName,
 
 static DWORD shim_GetFileAttributesA(LPCSTR lpFileName) {
     struct stat st;
-    if (stat(lpFileName, &st) != 0) {
+    if (stat(nocturne_data_path(lpFileName).c_str(), &st) != 0) {
         s_lastError = (DWORD)errno;
         return SHIM_INVALID_FILE_ATTRIBUTES;
     }
