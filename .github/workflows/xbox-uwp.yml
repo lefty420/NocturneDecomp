@@ -148,6 +148,7 @@ jobs:
           $log = New-Object System.Collections.Generic.List[string]
           $perFile = @()
           $msgs = @{}
+          $allErrs = New-Object System.Collections.Generic.List[string]
           $msgFiles = @{}
           foreach ($f in $files) {
             $rel = $f.FullName.Substring($R.Length + 1)
@@ -159,6 +160,7 @@ jobs:
             $perFile += [pscustomobject]@{ File = $rel; Errors = $errs.Count }
             $log.Add("##### $rel (errors: $($errs.Count))`n$out")
             foreach ($e in $errs) {
+              $allErrs.Add(($e -replace '^.*?pseudocode\\', ''))
               $m = ($e -replace '^.*?: (fatal )?error: ', '')
               $msgs[$m] = 1 + [int]$msgs[$m]
               if (-not $msgFiles.ContainsKey($m)) { $msgFiles[$m] = New-Object 'System.Collections.Generic.HashSet[string]' }
@@ -176,6 +178,9 @@ jobs:
           $lines = $top | ForEach-Object { "$($_.Value)x in $($msgFiles[$_.Key].Count) files: $($_.Key)" }
           Annotate 'Top errors (1-20)' (($lines | Select-Object -First 20) -join "`n")
           Annotate 'Top errors (21-40)' (($lines | Select-Object -Skip 20) -join "`n")
+          for ($i = 0; $i -lt [Math]::Min($allErrs.Count, 60); $i += 8) {
+            Annotate ('Error lines ' + ($i + 1)) (($allErrs | Select-Object -Skip $i -First 8) -join "`n")
+          }
           $hdr = $msgs.Keys | Where-Object { $_ -match "file not found" } | Sort-Object
           Annotate 'Missing headers' ($hdr -join "`n")
 

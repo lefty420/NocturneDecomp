@@ -74,6 +74,31 @@
 #else
 #include <unistd.h>
 #endif
+// The Microsoft toolchain (MSVC headers, clang-cl; what a UWP build uses) lacks
+// a few POSIX spellings that mingw supplies. Fill in exactly the ones this file
+// uses. Not compiled for mingw or Linux.
+#if defined(_MSC_VER)
+typedef long long ssize_t;
+#ifndef S_ISDIR
+#define S_ISDIR(m)  (((m) & _S_IFMT) == _S_IFDIR)
+#endif
+#ifndef S_ISREG
+#define S_ISREG(m)  (((m) & _S_IFMT) == _S_IFREG)
+#endif
+#ifndef S_ISCHR
+#define S_ISCHR(m)  (((m) & _S_IFMT) == _S_IFCHR)
+#endif
+#ifndef S_ISFIFO
+#define S_ISFIFO(m) (((m) & _S_IFMT) == _S_IFIFO)
+#endif
+#ifndef S_IWUSR
+#define S_IWUSR _S_IWRITE
+#endif
+// The UCRT's off_t and lseek are 32-bit; the file calls below take 64-bit
+// positions (high/low halves), so use the 64-bit forms.
+#define off_t   long long
+#define lseek   _lseeki64
+#endif
 // The reentrant broken-down-time calls, and the UTC offset that goes with them.
 // Windows' runtime spells the first two _s with the arguments the other way
 // round, and its struct tm has no tm_gmtoff — there the offset is a process-wide
