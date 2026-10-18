@@ -98,6 +98,8 @@ typedef long long ssize_t;
 // positions (high/low halves), so use the 64-bit forms.
 #define off_t   long long
 #define lseek   _lseeki64
+// <process.h> spells getpid _getpid.
+#define getpid  _getpid
 #endif
 // The reentrant broken-down-time calls, and the UTC offset that goes with them.
 // Windows' runtime spells the first two _s with the arguments the other way

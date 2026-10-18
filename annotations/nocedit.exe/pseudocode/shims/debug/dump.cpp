@@ -18,6 +18,10 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#if defined(_MSC_VER)
+// The Microsoft toolchain spells strcasecmp _stricmp. Not compiled for mingw or Linux.
+#define strcasecmp _stricmp
+#endif
 
 // =============================================================================
 // Common helpers
