@@ -244,3 +244,74 @@ jobs:
         with:
           name: uwp-game-compile-logs
           path: out/game/
+
+  # Informational: always succeeds. Builds SDL2 for UWP (x64, Release) from SDL's own
+  # VisualC-WinRT project and uploads SDL2.dll / SDL2.lib. Installs the UWP C++
+  # components first if the runner image lacks them. Result is in the annotations.
+  sdl-uwp-build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch SDL2
+        shell: pwsh
+        run: git clone -q --depth 1 -b SDL2 https://github.com/libsdl-org/SDL "$env:RUNNER_TEMP\sdl-src"
+
+      - name: Check, and if needed install, the UWP C++ components
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $ids = 'Microsoft.VisualStudio.Workload.Universal',
+                 'Microsoft.VisualStudio.ComponentGroup.UWP.VC',
+                 'Microsoft.VisualStudio.ComponentGroup.UWP.VC.BuildTools'
+          function Report($phase) {
+            foreach ($id in $ids) {
+              $p = & $vswhere -latest -products * -requires $id -property installationPath
+              $state = if ($p) { 'installed' } else { 'MISSING' }
+              "$phase  $id : $state"
+            }
+          }
+          Report 'before' | Out-File comps.txt
+          $have = & $vswhere -latest -products * -requires 'Microsoft.VisualStudio.ComponentGroup.UWP.VC' -property installationPath
+          if (-not $have) {
+            "installing Microsoft.VisualStudio.ComponentGroup.UWP.VC.BuildTools ..." | Out-File comps.txt -Append
+            $setup = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+            $proc = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList @(
+              'modify', '--installPath', "`"$vs`"",
+              '--add', 'Microsoft.VisualStudio.ComponentGroup.UWP.VC.BuildTools',
+              '--quiet', '--norestart', '--nocache')
+            "installer exit code: $($proc.ExitCode)" | Out-File comps.txt -Append
+            Report 'after' | Out-File comps.txt -Append
+          }
+          python .github\scripts\annotate_log.py --title "UWP C++ components" --file comps.txt --tail 12
+
+      - name: Build SDL2 for UWP (x64 Release)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          $sdk = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" |
+                  Where-Object { $_.Name -match '^10\.' } | Sort-Object Name | Select-Object -Last 1).Name
+          "msbuild: $msbuild`nWindows SDK: $sdk" | Out-File build-info.txt
+          $src = Join-Path $env:RUNNER_TEMP 'sdl-src'
+          & $msbuild "$src\VisualC-WinRT\SDL-UWP.vcxproj" /m /nologo /v:minimal `
+            /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 `
+            /p:WindowsTargetPlatformVersion=$sdk *> msbuild.log
+          $code = $LASTEXITCODE
+          "msbuild exit code: $code" | Out-File build-info.txt -Append
+          New-Item -ItemType Directory -Force out\sdl-uwp | Out-Null
+          Get-ChildItem $src -Recurse -Include SDL2.dll, SDL2.lib, SDL2.pdb -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'x64' } |
+            ForEach-Object { Copy-Item $_.FullName out\sdl-uwp; "built: $($_.FullName) ($($_.Length) bytes)" | Out-File build-info.txt -Append }
+          Copy-Item msbuild.log out\sdl-uwp\msbuild.log
+          python .github\scripts\annotate_log.py --title "SDL2 UWP build (exit $code)" --file msbuild.log --tail 15
+          python .github\scripts\annotate_log.py --title "SDL2 UWP build info" --file build-info.txt --tail 12
+          exit 0
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdl2-uwp-x64
+          path: out/sdl-uwp/
