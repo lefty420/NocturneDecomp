@@ -10,6 +10,10 @@ name: xbox-uwp
 
 on:
   workflow_dispatch:
+    inputs:
+      stride:
+        description: 'uwp-game-compile: compile every Nth decompiled source file (1 = all, slow)'
+        default: '20'
   push:
     branches: [xbox-uwp-gles-groundwork]
 
@@ -195,3 +199,47 @@ jobs:
         with:
           name: uwp-shim-compile-logs
           path: out/
+
+  # Informational: always succeeds. Compiles an evenly spaced sample of the
+  # decompiled game sources (src/, plus main/ and checks/) under the UWP API family
+  # and groups the errors into families. Raise `stride` down to 1 for everything.
+  uwp-game-compile:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch SDL2, SDL_ttf and Khronos GLES headers
+        shell: pwsh
+        run: |
+          $d = Join-Path $env:RUNNER_TEMP 'deps'
+          New-Item -ItemType Directory -Force $d | Out-Null
+          git clone -q --depth 1 -b SDL2 https://github.com/libsdl-org/SDL "$d\sdl"
+          git clone -q --depth 1 -b SDL2 https://github.com/libsdl-org/SDL_ttf "$d\ttf"
+          git clone -q --depth 1 https://github.com/KhronosGroup/OpenGL-Registry "$d\gl"
+          git clone -q --depth 1 https://github.com/KhronosGroup/EGL-Registry "$d\egl"
+          New-Item -ItemType Directory -Force "$d\inc" | Out-Null
+          Copy-Item "$d\sdl\include" "$d\inc\SDL2" -Recurse
+
+      - name: Compile a sample of the decompiled game sources under WINAPI_FAMILY_APP
+        shell: pwsh
+        run: |
+          $d = Join-Path $env:RUNNER_TEMP 'deps'
+          $R = Join-Path $PWD 'annotations\nocedit.exe\pseudocode'
+          New-Item -ItemType Directory -Force out\gen | Out-Null
+          python cmake\collect_sources.py --src-root "$R\src" --module "$R\main" --module "$R\checks" `
+            --out-dir out\gen --skip-list cmake\skip_list.txt --modules-file out\gen\modules.txt `
+            --exclude-module entry --exclude-module crt
+          $stride = '${{ github.event.inputs.stride }}'
+          if (-not $stride) { $stride = '20' }
+          python .github\scripts\uwp_compile.py --mode msvc --sources-dir out\gen --stride $stride --jobs 4 `
+            --include "$R\include" --include "$R\shims" --include "$d\sdl\include" --include "$d\inc" `
+            --include "$d\ttf" --include "$d\gl\api" --include "$d\egl\api" `
+            --root "$R\" --out out\game
+          exit 0
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uwp-game-compile-logs
+          path: out/game/
