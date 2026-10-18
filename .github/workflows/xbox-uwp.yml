@@ -258,36 +258,52 @@ jobs:
         shell: pwsh
         run: git clone -q --depth 1 -b SDL2 https://github.com/libsdl-org/SDL "$env:RUNNER_TEMP\sdl-src"
 
-      - name: Check, and if needed install, the UWP C++ components
+      - name: Diagnose the runner's Visual Studio and UWP support
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $lines = New-Object System.Collections.Generic.List[string]
+          foreach ($i in (& $vswhere -all -products * -format json | ConvertFrom-Json)) {
+            $lines.Add("VS: $($i.displayName) $($i.installationVersion) at $($i.installationPath)")
+          }
+          $vs = & $vswhere -latest -products * -property installationPath
+          $pk = (& $vswhere -latest -products * -include packages -format json | ConvertFrom-Json)[0].packages |
+                Where-Object { $_.id -match 'UWP|Universal|AppContainer|WindowsStore' } |
+                ForEach-Object { $_.id } | Sort-Object -Unique
+          $lines.Add("UWP-related installed packages: " + ($pk -join ', '))
+          $store = Get-ChildItem "$vs\VC\Tools\MSVC\*\lib\x64\store" -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          $lines.Add("UWP (store) lib dirs: " + ($store -join '; '))
+          $ts = Get-ChildItem "$vs\MSBuild\Microsoft\VC\*\Platforms\x64\PlatformToolsets" -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }
+          $lines.Add("x64 platform toolsets: " + (($ts | Sort-Object -Unique) -join ', '))
+          $at = Get-ChildItem "$vs\MSBuild\Microsoft\VC\*\Application Type" -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }
+          $lines.Add("MSBuild application types: " + (($at | Sort-Object -Unique) -join ', '))
+          $lines | Out-File diag.txt
+          python .github\scripts\annotate_log.py --title "Runner VS diagnosis" --file diag.txt --tail 12
+
+      - name: Install the UWP C++ components if missing
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vs = & $vswhere -latest -products * -property installationPath
-          $ids = 'Microsoft.VisualStudio.Workload.Universal',
-                 'Microsoft.VisualStudio.ComponentGroup.UWP.VC',
-                 'Microsoft.VisualStudio.ComponentGroup.UWP.VC.BuildTools'
-          function Report($phase) {
-            foreach ($id in $ids) {
-              $p = & $vswhere -latest -products * -requires $id -property installationPath
-              $state = if ($p) { 'installed' } else { 'MISSING' }
-              "$phase  $id : $state"
-            }
-          }
-          Report 'before' | Out-File comps.txt
-          $have = & $vswhere -latest -products * -requires 'Microsoft.VisualStudio.ComponentGroup.UWP.VC' -property installationPath
-          if (-not $have) {
-            "installing Microsoft.VisualStudio.ComponentGroup.UWP.VC.BuildTools ..." | Out-File comps.txt -Append
+          function HasStore { [bool](Get-ChildItem "$vs\VC\Tools\MSVC\*\lib\x64\store" -Directory -ErrorAction SilentlyContinue) }
+          "UWP libs present before: $(HasStore)" | Out-File install.txt
+          if (-not (HasStore)) {
             $setup = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
-            $proc = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList @(
-              'modify', '--installPath', "`"$vs`"",
-              '--add', 'Microsoft.VisualStudio.ComponentGroup.UWP.VC.BuildTools',
-              '--quiet', '--norestart', '--nocache')
-            "installer exit code: $($proc.ExitCode)" | Out-File comps.txt -Append
-            Report 'after' | Out-File comps.txt -Append
+            foreach ($id in 'Microsoft.VisualStudio.ComponentGroup.UWP.VC.BuildTools',
+                            'Microsoft.VisualStudio.ComponentGroup.UWP.VC',
+                            'Microsoft.VisualStudio.Workload.Universal') {
+              $args = @('modify', '--installPath', "`"$vs`"", '--add', $id, '--quiet', '--norestart', '--nocache')
+              if ($id -eq 'Microsoft.VisualStudio.Workload.Universal') { $args += '--includeRecommended' }
+              $proc = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList $args
+              "add $id -> installer exit $($proc.ExitCode); UWP libs present: $(HasStore)" | Out-File install.txt -Append
+              if (HasStore) { break }
+            }
+            $log = Get-ChildItem $env:TEMP -Filter 'dd_setup*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+            if ($log) { "--- tail of $($log.Name)" | Out-File install.txt -Append; Get-Content $log.FullName -Tail 15 | Out-File install.txt -Append }
           }
-          python .github\scripts\annotate_log.py --title "UWP C++ components" --file comps.txt --tail 12
+          python .github\scripts\annotate_log.py --title "UWP component install" --file install.txt --tail 25
 
-      - name: Build SDL2 for UWP (x64 Release)
+      - name: Build SDL2 for UWP (x64 Release), trying toolsets in turn
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -296,17 +312,22 @@ jobs:
                   Where-Object { $_.Name -match '^10\.' } | Sort-Object Name | Select-Object -Last 1).Name
           "msbuild: $msbuild`nWindows SDK: $sdk" | Out-File build-info.txt
           $src = Join-Path $env:RUNNER_TEMP 'sdl-src'
-          & $msbuild "$src\VisualC-WinRT\SDL-UWP.vcxproj" /m /nologo /v:minimal `
-            /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 `
-            /p:WindowsTargetPlatformVersion=$sdk *> msbuild.log
-          $code = $LASTEXITCODE
-          "msbuild exit code: $code" | Out-File build-info.txt -Append
+          $code = 1
+          foreach ($ts in 'v145', 'v143', 'v142') {
+            & $msbuild "$src\VisualC-WinRT\SDL-UWP.vcxproj" /m /nologo /v:minimal `
+              /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=$ts `
+              /p:WindowsTargetPlatformVersion=$sdk *> "msbuild-$ts.log"
+            $code = $LASTEXITCODE
+            "toolset $ts -> msbuild exit code $code" | Out-File build-info.txt -Append
+            Copy-Item "msbuild-$ts.log" msbuild.log
+            if ($code -eq 0) { break }
+          }
           New-Item -ItemType Directory -Force out\sdl-uwp | Out-Null
           Get-ChildItem $src -Recurse -Include SDL2.dll, SDL2.lib, SDL2.pdb -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match 'x64' } |
             ForEach-Object { Copy-Item $_.FullName out\sdl-uwp; "built: $($_.FullName) ($($_.Length) bytes)" | Out-File build-info.txt -Append }
-          Copy-Item msbuild.log out\sdl-uwp\msbuild.log
-          python .github\scripts\annotate_log.py --title "SDL2 UWP build (exit $code)" --file msbuild.log --tail 15
+          Copy-Item msbuild*.log out\sdl-uwp\
+          python .github\scripts\annotate_log.py --title "SDL2 UWP build (last exit $code)" --file msbuild.log --tail 15
           python .github\scripts\annotate_log.py --title "SDL2 UWP build info" --file build-info.txt --tail 12
           exit 0
 
