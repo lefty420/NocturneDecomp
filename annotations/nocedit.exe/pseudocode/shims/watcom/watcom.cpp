@@ -19,8 +19,10 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
 #include <filesystem>
 #include <system_error>
+#include <thread>
 // The descriptor-based half of Watcom's io.h — here just lseek and ftruncate.
 // A file descriptor is not POSIX-only: Windows' own runtime has both, as _lseek
 // and _chsize in <io.h>, so this is a spelling difference rather than a port.
@@ -347,3 +349,20 @@ void _atexit(WatcomStaticDestructorNode* node) {
     // In a full runtime, this would register the destructor for atexit() cleanup.
     // For now, static destructors are not critical for execution.
 }
+
+#ifdef _MSC_VER
+// chdir() and sleep() for the Microsoft toolchain (see system/watcom.h, which
+// renames them). Only the game's in-engine editor tools call chdir, to move around
+// a directory browser; a UWP app cannot change its working directory, so it reports
+// failure the way any chdir that did not succeed would. sleep() keeps its POSIX
+// meaning (seconds), which is what it means on the Linux and mingw builds.
+int chdir(const char *) {
+    errno = ENOSYS;
+    return -1;
+}
+
+unsigned int sleep(unsigned int seconds) {
+    std::this_thread::sleep_for(std::chrono::seconds(seconds));
+    return 0;
+}
+#endif  // _MSC_VER

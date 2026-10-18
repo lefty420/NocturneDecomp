@@ -74,6 +74,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--include", action="append", default=[])
     ap.add_argument("--root", default="", help="path prefix to strip from messages")
+    ap.add_argument("--always", default="", help="regex: files matching it are compiled regardless of stride")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
 
@@ -83,6 +84,10 @@ def main():
             files += [l.strip() for l in f if l.strip()]
     files = sorted(set(files))
     sample = files[::max(1, a.stride)]
+    if a.always:
+        pat = re.compile(a.always)
+        have = set(sample)
+        sample += [f for f in files if pat.search(f) and f not in have]
 
     env = msvc_env() if a.mode == "msvc" else dict(os.environ)
     cmd = build_cmd(a.mode, a.include)

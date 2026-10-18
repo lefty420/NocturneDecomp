@@ -290,11 +290,22 @@ extern void* _memset(void* dest, int value, size_t count);
 // inclusion), then give ours distinct names; the shims' definitions pick the
 // same rename up from this header.
 #include <io.h>
+#include <direct.h>
 #define tell nocturne_watcom_tell
 #define chsize nocturne_watcom_chsize
+// Decompiled code calls chdir() and sleep(), which the Microsoft toolchain does not
+// have (and a UWP app may not change its working directory at all). The shims supply
+// them under these names. <direct.h> is pulled in first for the same include-guard
+// reason as <io.h>.
+#define chdir nocturne_watcom_chdir
+#define sleep nocturne_watcom_sleep
 #endif
 extern long tell(int fd);
 extern int chsize(int fd, long size);
+#ifdef _MSC_VER
+extern int chdir(const char *path);
+extern unsigned int sleep(unsigned int seconds);
+#endif
 
 // access() mode flags
 #ifndef F_OK
