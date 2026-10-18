@@ -98,8 +98,10 @@ typedef long long ssize_t;
 // positions (high/low halves), so use the 64-bit forms.
 #define off_t   long long
 #define lseek   _lseeki64
-// <process.h> spells getpid _getpid.
-#define getpid  _getpid
+// _getpid is not available to UWP apps; GetCurrentProcessId is. Declared here
+// directly because this file does not include <windows.h>.
+extern "C" __declspec(dllimport) unsigned long __stdcall GetCurrentProcessId(void);
+#define getpid() ((int)GetCurrentProcessId())
 #endif
 // The reentrant broken-down-time calls, and the UTC offset that goes with them.
 // Windows' runtime spells the first two _s with the arguments the other way
