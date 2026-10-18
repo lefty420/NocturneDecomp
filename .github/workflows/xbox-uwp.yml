@@ -13,7 +13,7 @@ on:
     inputs:
       stride:
         description: 'uwp-game-compile: compile every Nth decompiled source file (1 = all, slow)'
-        default: '20'
+        default: '1'
   push:
     branches: [xbox-uwp-gles-groundwork]
 
@@ -231,7 +231,7 @@ jobs:
             --out-dir out\gen --skip-list cmake\skip_list.txt --modules-file out\gen\modules.txt `
             --exclude-module entry --exclude-module crt
           $stride = '${{ github.event.inputs.stride }}'
-          if (-not $stride) { $stride = '20' }
+          if (-not $stride) { $stride = '1' }
           python .github\scripts\uwp_compile.py --mode msvc --sources-dir out\gen --stride $stride --jobs 4 `
             --include "$R\include" --include "$R\shims" --include "$d\sdl\include" --include "$d\inc" `
             --include "$d\ttf" --include "$d\gl\api" --include "$d\egl\api" `
