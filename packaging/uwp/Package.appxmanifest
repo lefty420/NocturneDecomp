@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  TEMPLATE, NOT YET BUILT OR DEPLOYED. See docs/xbox-uwp.md.
+
+  Meant to be dropped into the Visual Studio UWP app-shell project that hosts the
+  game (SDL2's WinRT template). Things to fill in or confirm when you do:
+    - Publisher must match the certificate Visual Studio signs the package with.
+    - EntryPoint must be the App class of the shell project you build; the value
+      below is the name SDL2's WinRT template uses, so change it if yours differs.
+    - Logo files under Assets\ are required by the manifest and are not included.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  IgnorableNamespaces="uap mp">
+
+  <Identity Name="NocturneDecomp.Dev" Publisher="CN=YourName" Version="0.1.0.0" />
+  <mp:PhoneIdentity PhoneProductId="00000000-0000-0000-0000-000000000000"
+                    PhonePublisherId="00000000-0000-0000-0000-000000000000" />
+
+  <Properties>
+    <DisplayName>Nocturne (decomp, dev build)</DisplayName>
+    <PublisherDisplayName>Dev</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="x-generate" />
+  </Resources>
+
+  <Applications>
+    <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="SDL2_WinRT_App.App">
+      <uap:VisualElements
+        DisplayName="Nocturne"
+        Description="Nocturne decompilation, dev build"
+        BackgroundColor="#000000"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- Only needed for netplay. Remove for an offline build. -->
+    <Capability Name="internetClient" />
+    <Capability Name="privateNetworkClientServer" />
+  </Capabilities>
+</Package>

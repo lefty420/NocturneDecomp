@@ -75,6 +75,17 @@
       }
     },
     {
+      "name": "exe-linux-gles-x86_64",
+      "displayName": "Full exe (Linux native 64-bit) on OpenGL ES 3.0",
+      "description": "Same as exe-linux-x86_64 but through the OpenGL ES 3.0 path that the Xbox/UWP port uses (via ANGLE there, Mesa here). Needs GLES3 headers (sudo apt install libgles-dev). Use it to validate the ES path before touching a console.",
+      "inherits": "exe-linux-x86_64",
+      "binaryDir": "${sourceDir}/build/exe-linux-gles-x86_64",
+      "cacheVariables": {
+        "NOCTURNE_GLES": "ON",
+        "NOCTURNE_BUILD_TAG": "exe-linux-gles-x86_64"
+      }
+    },
+    {
       "name": "check-windows-x86_64",
       "displayName": "Syntax check (Windows 64-bit, cross-compiled)",
       "description": "Per-file -fsyntax-only verification against the Windows target, for checking portability without a full link.",

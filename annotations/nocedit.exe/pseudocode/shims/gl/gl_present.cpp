@@ -84,7 +84,8 @@ bool ensure_texture(int width, int height, GLenum format, GLenum type) {
     }
 
     set_sampling(g_gl.framebuffer_texture, GL_NEAREST);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, format, type, nullptr);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, NOCTURNE_GL_INTERNAL_FOR(format), width, height, 0,
+                  format, type, nullptr);
 
     g_gl.texture_width  = width;
     g_gl.texture_height = height;
@@ -149,9 +150,16 @@ extern "C" int nocturne_gl_init(SDL_Window *window) {
     // objects, instanced-free indexed drawing — and asking for exactly it keeps
     // the driver from handing back something older on a machine that could do
     // better.
+#if NOCTURNE_GLES
+    // UWP/Xbox: OpenGL ES 3.0 through ANGLE (Direct3D 11 underneath).
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+#endif
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
@@ -249,7 +257,7 @@ extern "C" int nocturne_gl_scene_target_bind(int width, int height) {
     gl.BindTexture(GL_TEXTURE_2D, g_gl.scene_color);
     gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
+    gl.TexImage2D(GL_TEXTURE_2D, 0, NOCTURNE_GL_INTERNAL_BGRA8, width, height, 0,
                   GL_BGRA, GL_UNSIGNED_BYTE, nullptr);
 
     gl.GenRenderbuffers(1, &g_gl.scene_depth);

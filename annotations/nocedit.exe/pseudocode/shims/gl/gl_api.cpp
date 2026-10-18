@@ -38,6 +38,31 @@ void load_optional(Fn *slot, const char *name) {
     *slot = reinterpret_cast<Fn>(SDL_GL_GetProcAddress(name));
 }
 
+#if NOCTURNE_GLES
+// Desktop entry points that OpenGL ES 3.0 does not have, kept behind the same
+// table slots so no call site changes.
+//   glClearDepth / glDepthRange   -> the float forms, glClearDepthf / glDepthRangef
+//   glDrawBuffer(mode)            -> glDrawBuffers(1, &mode)
+//   glPolygonMode                 -> nothing; ES has no wireframe/point fill and
+//                                    no caller in this tree uses it
+//   glGetTexImage                 -> left null; its only caller already
+//                                    null-checks it (trigl_gl.cpp)
+void (APIENTRY *s_ClearDepthf)(GLfloat)         = nullptr;
+void (APIENTRY *s_DepthRangef)(GLfloat, GLfloat) = nullptr;
+void (APIENTRY *s_DrawBuffers)(GLsizei, const GLenum *) = nullptr;
+
+void APIENTRY es_ClearDepth(GLclampd depth) {
+    if (s_ClearDepthf != nullptr) s_ClearDepthf((GLfloat)depth);
+}
+void APIENTRY es_DepthRange(GLclampd n, GLclampd f) {
+    if (s_DepthRangef != nullptr) s_DepthRangef((GLfloat)n, (GLfloat)f);
+}
+void APIENTRY es_DrawBuffer(GLenum mode) {
+    if (s_DrawBuffers != nullptr) s_DrawBuffers(1, &mode);
+}
+void APIENTRY es_PolygonMode(GLenum, GLenum) {}
+#endif  // NOCTURNE_GLES
+
 }  // namespace
 
 #define NOCTURNE_GL_LOAD(field) load_one(&gl.field, "gl" #field, &missing)
@@ -56,23 +81,34 @@ extern "C" int nocturne_gl_load_api(void) {
     NOCTURNE_GL_LOAD(Viewport);
     NOCTURNE_GL_LOAD(Scissor);
     NOCTURNE_GL_LOAD(ClearColor);
+#if NOCTURNE_GLES
+    load_one(&s_ClearDepthf, "glClearDepthf", &missing);
+    load_one(&s_DepthRangef, "glDepthRangef", &missing);
+    load_one(&s_DrawBuffers, "glDrawBuffers", &missing);
+    gl.ClearDepth  = es_ClearDepth;
+    gl.DepthRange  = es_DepthRange;
+    gl.DrawBuffer  = es_DrawBuffer;
+    gl.PolygonMode = es_PolygonMode;
+    gl.GetTexImage = nullptr;
+#else
     NOCTURNE_GL_LOAD(ClearDepth);
+    NOCTURNE_GL_LOAD(DrawBuffer);
+    NOCTURNE_GL_LOAD_OPT(GetTexImage);
+    NOCTURNE_GL_LOAD(DepthRange);
+    NOCTURNE_GL_LOAD(PolygonMode);
+#endif
     NOCTURNE_GL_LOAD(Clear);
     NOCTURNE_GL_LOAD(PixelStorei);
     NOCTURNE_GL_LOAD(ReadBuffer);
-    NOCTURNE_GL_LOAD(DrawBuffer);
     NOCTURNE_GL_LOAD(ReadPixels);
-    NOCTURNE_GL_LOAD_OPT(GetTexImage);
 
     NOCTURNE_GL_LOAD(Enable);
     NOCTURNE_GL_LOAD(Disable);
     NOCTURNE_GL_LOAD(BlendFunc);
     NOCTURNE_GL_LOAD(DepthFunc);
     NOCTURNE_GL_LOAD(DepthMask);
-    NOCTURNE_GL_LOAD(DepthRange);
     NOCTURNE_GL_LOAD(CullFace);
     NOCTURNE_GL_LOAD(FrontFace);
-    NOCTURNE_GL_LOAD(PolygonMode);
     NOCTURNE_GL_LOAD(PolygonOffset);
 
     NOCTURNE_GL_LOAD(GenFramebuffers);

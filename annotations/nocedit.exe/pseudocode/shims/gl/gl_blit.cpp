@@ -35,7 +35,7 @@ GLint  g_attr_uv  = -1;
 // top of the viewport — with z = 0 passing through unchanged. Those four points
 // are the vertex buffer below.
 const char *kVertexSource =
-    "#version 150 core\n"
+    NOCTURNE_GLSL_VERSION
     "in  vec2 a_pos;\n"
     "in  vec2 a_uv;\n"
     "out vec2 v_uv;\n"
@@ -48,7 +48,7 @@ const char *kVertexSource =
 // which matters for the scene-FBO seed — that target is RGBA8 and keeps what is
 // written to it.
 const char *kFragmentSource =
-    "#version 150 core\n"
+    NOCTURNE_GLSL_VERSION
     "uniform sampler2D u_tex;\n"
     "in  vec2 v_uv;\n"
     "out vec4 o_color;\n"

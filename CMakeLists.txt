@@ -36,6 +36,13 @@ option(NOCTURNE_ASAN
 # than the whole decompiled tree (shim_config.h reaches every TU via nocturne.h).
 option(NOCTURNE_GL_PRESENT "Present through OpenGL (OFF = legacy SDL_Renderer)" ON)
 
+# OpenGL ES 3.0 instead of desktop GL 3.3 core. Required for UWP / Xbox, where
+# ANGLE supplies ES 3.0 over Direct3D 11 (see docs/xbox-uwp.md). Like
+# NOCTURNE_GL_PRESENT it is defined only on the shim target. ANGLE_INCLUDE_DIR
+# must contain GLES3/gl3.h and GLES2/gl2ext.h.
+option(NOCTURNE_GLES "Use OpenGL ES 3.0 (ANGLE) instead of desktop GL 3.3 core" OFF)
+set(NOCTURNE_ANGLE_INCLUDE_DIR "" CACHE PATH "ANGLE include directory (GLES3/gl3.h), used with NOCTURNE_GLES")
+
 option(NOCTURNE_USE_CCACHE
     "Route the compiler through ccache if available"
     ON)
@@ -466,6 +473,12 @@ if(NOCTURNE_BUILD_EXE)
     target_compile_features(nocturne_shims PRIVATE cxx_std_17)
     if(NOT NOCTURNE_GL_PRESENT)
         target_compile_definitions(nocturne_shims PRIVATE NOCTURNE_GL_PRESENT=0)
+    endif()
+    if(NOCTURNE_GLES)
+        target_compile_definitions(nocturne_shims PRIVATE NOCTURNE_GLES=1)
+        if(NOCTURNE_ANGLE_INCLUDE_DIR)
+            target_include_directories(nocturne_shims PRIVATE "${NOCTURNE_ANGLE_INCLUDE_DIR}")
+        endif()
     endif()
 
     # FFmpeg is built by ExternalProject at build time; its headers must exist
