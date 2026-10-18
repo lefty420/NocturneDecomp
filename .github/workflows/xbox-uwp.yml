@@ -1,0 +1,79 @@
+name: xbox-uwp
+
+# Stage 1 of the Xbox/UWP port (see docs/xbox-uwp.md).
+#   gles-syntax : the OpenGL ES 3.0 code path still compiles (both GL modes).
+#   uwp-probe   : can a Windows runner compile and link a UWP-flavoured program
+#                 with clang-cl? Prints what is installed so the next stage is
+#                 built on facts. It builds no game code and produces no package.
+#
+# Runs on pushes to the port branch and by hand (Actions tab -> xbox-uwp -> Run).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [xbox-uwp-gles-groundwork]
+
+jobs:
+  gles-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch SDL2 and Khronos GLES headers
+        run: |
+          mkdir -p "$RUNNER_TEMP/deps" && cd "$RUNNER_TEMP/deps"
+          git clone -q --depth 1 -b SDL2 https://github.com/libsdl-org/SDL sdl
+          git clone -q --depth 1 https://github.com/KhronosGroup/OpenGL-Registry gl
+          git clone -q --depth 1 https://github.com/KhronosGroup/EGL-Registry egl
+
+      - name: Syntax-check GL files in desktop and ES modes
+        run: |
+          D="$RUNNER_TEMP/deps"
+          R="$PWD/annotations/nocedit.exe/pseudocode"
+          cd "$R/shims"
+          fail=0
+          for mode in 0 1; do
+            for f in gl/gl_api.cpp gl/gl_blit.cpp gl/gl_present.cpp gl/gl_program.cpp \
+                     renderer/trigl_gl.cpp renderer/trigl_device.cpp; do
+              if clang++ -fsyntax-only -std=gnu++17 -x c++ -DNOCTURNE_GLES=$mode \
+                   -I "$R/include" -I "$R/shims" -I "$D/sdl/include" \
+                   -I "$D/gl/api" -I "$D/egl/api" "$f"; then
+                echo "ok   GLES=$mode $f"
+              else
+                echo "FAIL GLES=$mode $f"; fail=1
+              fi
+            done
+          done
+          exit $fail
+
+  uwp-probe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report toolchain
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          & $vswhere -all -products * -format json | Out-String | Write-Host
+          Write-Host "--- Windows SDKs"
+          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" | Select-Object Name
+          Write-Host "--- UWP import lib"
+          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Lib" -Recurse -Filter WindowsApp.lib |
+            Select-Object -First 5 FullName
+          Write-Host "--- clang"
+          Get-Command clang-cl, clang -ErrorAction SilentlyContinue | Select-Object Source
+          clang-cl --version
+
+      - name: Compile and link a UWP-flavoured program with clang-cl
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" uwp 2>nul || call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          echo #include ^<windows.h^>> probe.cpp
+          echo #include ^<cstdio^>>> probe.cpp
+          echo int main(){ std::printf("uwp probe\n"); return 0; }>> probe.cpp
+          clang-cl /std:c++17 /DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0A00 /c probe.cpp
+          if errorlevel 1 exit /b 1
+          link /APPCONTAINER /MACHINE:X64 probe.obj WindowsApp.lib
+          if errorlevel 1 exit /b 1
+          echo probe linked
