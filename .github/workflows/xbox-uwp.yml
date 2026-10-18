@@ -99,3 +99,90 @@ jobs:
 
           $summary | Set-Content $env:GITHUB_STEP_SUMMARY
           if (-not ($compileOk -and $linkOk)) { exit 1 }
+
+  # Informational: always succeeds. Compiles every shim source under the UWP
+  # API family with clang-cl and reports what fails, so the Win32/POSIX calls UWP
+  # rejects can be fixed in order. Syntax-only; produces no binary.
+  uwp-shim-compile:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch SDL2 and Khronos GLES headers
+        shell: pwsh
+        run: |
+          $d = Join-Path $env:RUNNER_TEMP 'deps'
+          New-Item -ItemType Directory -Force $d | Out-Null
+          git clone -q --depth 1 -b SDL2 https://github.com/libsdl-org/SDL "$d\sdl"
+          git clone -q --depth 1 https://github.com/KhronosGroup/OpenGL-Registry "$d\gl"
+          git clone -q --depth 1 https://github.com/KhronosGroup/EGL-Registry "$d\egl"
+
+      - name: Compile shims under WINAPI_FAMILY_APP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $d = Join-Path $env:RUNNER_TEMP 'deps'
+          $R = Join-Path $PWD 'annotations\nocedit.exe\pseudocode'
+
+          # MSVC x64 environment (include/lib paths).
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" | ForEach-Object {
+            if ($_ -match '^(.*?)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] }
+          }
+
+          function Annotate($title, $text) {
+            $t = ($text | Out-String).Trim()
+            if ($t.Length -gt 1800) { $t = $t.Substring(0, 1800) + ' ...(truncated)' }
+            $t = $t -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A'
+            Write-Host "::notice title=$title::$t"
+          }
+
+          $files = Get-ChildItem "$R\shims" -Recurse -Include *.cpp,*.c |
+                   Where-Object { $_.Name -ne 'winsock_posix.c' }
+          $log = New-Object System.Collections.Generic.List[string]
+          $perFile = @()
+          $msgs = @{}
+          $msgFiles = @{}
+          foreach ($f in $files) {
+            $rel = $f.FullName.Substring($R.Length + 1)
+            $out = & clang-cl /nologo /TP /std:c++17 /Zs /clang:-Wno-everything `
+              /DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0A00 /DNOCTURNE_GLES=1 `
+              "/I$R\include" "/I$R\shims" "/I$d\sdl\include" "/I$d\gl\api" "/I$d\egl\api" `
+              $f.FullName 2>&1 | Out-String
+            $errs = @($out -split "`r?`n" | Where-Object { $_ -match ': (fatal )?error: ' })
+            $perFile += [pscustomobject]@{ File = $rel; Errors = $errs.Count }
+            $log.Add("##### $rel (errors: $($errs.Count))`n$out")
+            foreach ($e in $errs) {
+              $m = ($e -replace '^.*?: (fatal )?error: ', '')
+              $msgs[$m] = 1 + [int]$msgs[$m]
+              if (-not $msgFiles.ContainsKey($m)) { $msgFiles[$m] = New-Object 'System.Collections.Generic.HashSet[string]' }
+              [void]$msgFiles[$m].Add($rel)
+            }
+          }
+
+          $ok = @($perFile | Where-Object { $_.Errors -eq 0 })
+          $bad = @($perFile | Where-Object { $_.Errors -gt 0 } | Sort-Object Errors -Descending)
+          Annotate 'Shim compile totals' ("files: $($perFile.Count), clean: $($ok.Count), with errors: $($bad.Count), total errors: $(($perFile | Measure-Object Errors -Sum).Sum)")
+          Annotate 'Worst files' (($bad | Select-Object -First 25 | ForEach-Object { "$($_.Errors)  $($_.File)" }) -join "`n")
+          Annotate 'Clean files' (($ok | ForEach-Object { $_.File }) -join "`n")
+
+          $top = $msgs.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 40
+          $lines = $top | ForEach-Object { "$($_.Value)x in $($msgFiles[$_.Key].Count) files: $($_.Key)" }
+          Annotate 'Top errors (1-20)' (($lines | Select-Object -First 20) -join "`n")
+          Annotate 'Top errors (21-40)' (($lines | Select-Object -Skip 20) -join "`n")
+          $hdr = $msgs.Keys | Where-Object { $_ -match "file not found" } | Sort-Object
+          Annotate 'Missing headers' ($hdr -join "`n")
+
+          New-Item -ItemType Directory -Force out | Out-Null
+          $log | Set-Content out\shim-compile.log
+          ($perFile | Sort-Object Errors -Descending | Format-Table -AutoSize | Out-String -Width 200) | Set-Content out\per-file.txt
+          Get-Content out\per-file.txt | Select-Object -First 200 | Set-Content $env:GITHUB_STEP_SUMMARY
+          exit 0
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uwp-shim-compile-logs
+          path: out/
