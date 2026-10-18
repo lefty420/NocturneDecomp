@@ -6,6 +6,30 @@ What exists today is the renderer half of the job: the GL layer can now run on O
 which is what ANGLE provides on UWP/Xbox (ES 3.0 over Direct3D 11). The rest is listed under
 *Remaining work* below.
 
+## CI status (`.github/workflows/xbox-uwp.yml`)
+
+Runs on pushes to `xbox-uwp-gles-groundwork` and by hand. Syntax-level only: no game binary is
+built or linked, and nothing runs.
+
+| Job | What it checks | Latest result |
+|---|---|---|
+| `gles-syntax` | the GL files compile in desktop and ES modes | passes |
+| `uwp-probe` | a Windows runner can compile (clang-cl, `WINAPI_FAMILY_APP`) and link (`/APPCONTAINER`, `WindowsApp.lib`) a small program | passes |
+| `uwp-shim-compile` | every file under `shims/` compiles with clang-cl under `WINAPI_FAMILY_APP` in ES mode | 107 of 108 files clean; `win32/mci_video.cpp` fails only because FFmpeg headers are not on the runner |
+
+That job reports results as run annotations, and the full log is attached to the run as the
+`uwp-shim-compile-logs` artifact. It does **not** yet cover the decompiled game sources under
+`src/`, only the platform layer.
+
+What it took to get there, for anyone hitting the same errors: the Watcom calling-convention
+macros in `include/system/basetypes.h` were guarded by `_MSC_VER` and are now unconditional; the
+shims' `tell()`/`chsize()` are renamed under MSVC to avoid the UCRT's; `kernel32.cpp` supplies
+`ssize_t`, `S_ISDIR` and friends, 64-bit `off_t`/`lseek`, and uses `GetCurrentProcessId` instead of
+`_getpid` (not available to UWP) when built with the Microsoft toolchain; `dump.cpp` uses
+`_stricmp`. A new `core/data_root` resolves the game's relative paths against the app's local
+folder on UWP (unchanged elsewhere) and is used by the file-open, attribute, delete,
+create-directory and file-search entry points and by `watcom_resolve_fs_path`.
+
 ## Why ES 3.0 and ANGLE
 
 UWP has no desktop OpenGL, and a console in Dev Mode can only run UWP apps. The renderer
@@ -55,16 +79,16 @@ Not checked: a full link, or a run, of either mode.
    project compiled by MSVC (`/ZW`), so the realistic layout is an MSVC shell project that links
    a static library of the game built with `WINAPI_FAMILY_APP`. `packaging/uwp/Package.appxmanifest`
    is a starting template for that shell, not a working one.
-3. **Compiler/toolchain.** The tree is built with clang and a clang-specific warning set. Whether
-   clang-cl targeting UWP accepts the whole tree and flag set is untested.
+3. **Compiler/toolchain.** The platform layer (`shims/`) now compiles under clang-cl with the UWP
+   API family (see CI status). The decompiled game sources under `src/` have not been tried yet.
 4. **Win32 API restrictions.** UWP blocks or removes many Win32 calls the shims currently use or
    will reach for (`SetCurrentDirectory`/`chdir`, `LoadLibrary` of arbitrary files, `CreateWindow`,
    `winmm` pieces, some `kernel32` calls). Each needs checking against the UWP API surface.
 5. **File access and game data.** A UWP app cannot read arbitrary paths and cannot change its
-   working directory, and the game's file code (`shims/win32/kernel32.cpp`, `core/file_search.cpp`,
-   the ini and log code) uses plain relative paths. Needed: one data-root function that maps those
-   paths onto the app's local folder (where you copy your own game files through Device Portal),
-   used by every file entry point.
+   working directory. `core/data_root` now maps relative paths onto the app's local folder (where
+   you copy your own game files through Device Portal) and is applied in the main file entry
+   points. Still to do: audit the remaining ways the code touches files (direct `fopen`/`std::ofstream`
+   in the ini, log and dump code) and confirm none bypass it, then test it for real on UWP.
 6. **Input.** The shims have gamepad support (`shims/game/`); it needs verifying through SDL's
    WinRT gamepad backend with an Xbox controller.
 7. **Memory and performance.** Dev Mode apps have a fixed memory budget that differs between
