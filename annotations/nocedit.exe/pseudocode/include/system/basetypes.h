@@ -41,13 +41,19 @@
 // =============================================================================
 // Calling conventions parsed from x86watcom.cspec - define as empty for non-MSVC compilers
 #ifndef _MSC_VER
-// Standard Windows calling conventions
+// Standard Windows calling conventions. Under MSVC/clang-cl these are real
+// keywords, so they are left alone there (on x86_64 there is one convention and
+// they are ignored anyway).
 #define __cdecl
 #define __stdcall
 #define __fastcall
 #define __thiscall
 #define __vectorcall
-// Calling conventions from x86watcom.cspec
+#endif
+// Calling conventions from x86watcom.cspec. These names exist only in the
+// decompiled headers, so they must be blanked on EVERY compiler, MSVC included
+// -- guarding them with _MSC_VER left them undefined under clang-cl and broke
+// every header that uses them (the UWP port builds with clang-cl).
 #define __watcallRegister
 #define __watcallStack
 #define __cdecl_scratch
@@ -86,7 +92,6 @@
 #define __mmx_save
 // Unknown conventions
 #define __unknown
-#endif
 
 // =============================================================================
 // Ghidra Primitive Types
