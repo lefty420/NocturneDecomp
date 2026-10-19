@@ -84,7 +84,7 @@ jobs:
           Set-Location $env:GITHUB_WORKSPACE
           python .github\scripts\annotate_log.py --title "ANGLE build info" --file build.txt --tail 20
           foreach ($c in 'false','true') {
-            foreach ($k in 'gn','ninja') { if (Test-Path "$k-$c.txt") { python .github\scripts\annotate_log.py --title "$k is_clang=$c" --file "$k-$c.txt" --tail 15 } }
+            foreach ($k in 'gn','ninja') { if (Test-Path "$k-$c.txt") { python .github\scripts\annotate_log.py --title "$k is_clang=$c" --file "$k-$c.txt" --tail 4 --head 25 } }
           }
           exit 0
 

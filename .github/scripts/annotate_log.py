@@ -24,6 +24,7 @@ def main():
     ap.add_argument("--title", required=True)
     ap.add_argument("--file", required=True)
     ap.add_argument("--tail", type=int, default=25)
+    ap.add_argument("--head", type=int, default=0, help="also annotate the first N lines")
     ap.add_argument("--max-errors", type=int, default=15)
     a = ap.parse_args()
 
@@ -41,6 +42,8 @@ def main():
             errs.append(l.strip()[:300])
     annotate(f"{a.title}: {len(errs)} distinct error lines, {len(lines)} log lines", "\n".join(errs[:a.max_errors]) or "(no error lines)")
     annotate(f"{a.title}: log tail", "\n".join(l.strip()[:300] for l in lines[-a.tail:]))
+    if a.head:
+        annotate(f"{a.title}: log head", "\n".join(l.strip()[:300] for l in lines[:a.head]))
     return 0
 
 
