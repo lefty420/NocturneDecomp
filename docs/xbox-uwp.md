@@ -110,6 +110,24 @@ Not checked: a full link, or a run, of either mode.
    Xbox One and Series X|S. Check the current limits for your console in Microsoft's docs and
    measure the game's peak usage, including the FMV decoder.
 
+## What Xbox UWP restricts (from Microsoft's docs and community reports)
+
+Sources: Microsoft's [UWP limitations on Xbox](https://github.com/MicrosoftDocs/winrt-related/blob/docs/winrt-related-src/extension-sdks/uwp-limitations-on-xbox.md) page (dated 2020, so possibly stale), and a [Microsoft Q&A thread](https://learn.microsoft.com/en-in/answers/questions/573133/file-and-folder-picker-usage-policies-on-xbox-cons) (2021-2024). Nothing below has been tested by us on a console.
+
+| Restriction | What it means for this port |
+|---|---|
+| "Scenarios related to folder pickers are not supported on Xbox" | The documented answer is no, but the Q&A thread reports pickers working on a retail Xbox One X and on dev-mode builds, with navigation limited (no arbitrary drives, Downloads usable). So an in-app folder or file picker is worth trying but cannot be the only way to add game files. |
+| `broadFileSystemAccess` "not supported on Xbox" | Documented as unsupported; a community report says it still works in Developer Mode for sideloaded apps, and one project uses it to reach `D:\DevelopmentFiles` in dev mode. Declared as a restricted capability in the manifest. |
+| `KnownFolders.RemovableDevices` | Needs the `removableStorage` capability plus at least one file type association in the manifest; only declared extensions are visible. Xbox support is not confirmed by Microsoft's page. Possible route for a USB drive. |
+| Microsoft policy 10.13.4 | Store apps may not offer general browsing of the file system. Irrelevant for sideloading in Dev Mode, but it is why pickers are restricted. |
+| HumanInterfaceDevice APIs not supported | Raw HID is out; controllers must come through the Windows.Gaming.Input path that SDL's WinRT backend uses. Needs checking with a real controller. |
+| Roaming settings not synchronized; toasts limited; no tiles, no drag and drop | None of these affect the game. |
+| "All APIs are callable, and will fail gracefully if unsupported" | Failures show up at run time, not compile time, so the app must report them on screen. |
+
+Not covered by that page: memory limits, resolution limits, background suspension, and Dev Mode behaviour. Those need Microsoft's current Xbox developer documentation.
+
+**Consequence for adding game files.** The in-app importer will try, in order: the system file/folder picker, a USB drive via removable storage, and a folder in `DevelopmentFiles`. The one route that does not depend on any of that is Device Portal's file explorer, which copies straight into the app's local folder. The app's Game Files screen is built to work with all of them: it rescans the local folder, shows exactly which files are present or missing, and reports plainly when a method is refused.
+
 ## Deploying, once there is a build
 
 1. Enable Dev Mode on the console and note its IP address.
