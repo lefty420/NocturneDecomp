@@ -38,6 +38,8 @@ jobs:
           cmd /c "gclient config --unmanaged https://chromium.googlesource.com/angle/angle.git --name angle" *> $env:GITHUB_WORKSPACE\fetch.txt
           cmd /c "gclient sync --no-history --nohooks -j8 --revision angle@origin/main" *>> $env:GITHUB_WORKSPACE\fetch.txt
           "sync exit: $LASTEXITCODE" | Out-File $env:GITHUB_WORKSPACE\fetch.txt -Append
+          cmd /c "gclient runhooks" *>&1 | Select-Object -Last 40 | Out-File $env:GITHUB_WORKSPACE\fetch.txt -Append
+          "runhooks exit: $LASTEXITCODE" | Out-File $env:GITHUB_WORKSPACE\fetch.txt -Append
           Set-Location $env:GITHUB_WORKSPACE
           python .github\scripts\annotate_log.py --title "ANGLE fetch" --file fetch.txt --tail 20
           exit 0
