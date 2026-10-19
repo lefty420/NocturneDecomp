@@ -72,12 +72,12 @@ jobs:
             ForEach-Object { "$($_.Filename):$($_.LineNumber): $($_.Line.Trim())" } | Select-Object -First 25 | Out-File $diag -Append
           python "$env:GITHUB_WORKSPACE\.github\scripts\annotate_log.py" --title "ANGLE build-config diag" --file $diag --tail 40
           $built = $false
-          foreach ($clang in 'true') {
+          foreach ($clang in 'false') {
             $out = "out\uwp-$clang"
             $args = @('target_os="winuwp"', 'target_cpu="x64"', 'is_debug=false', 'is_component_build=false',
                       "is_clang=$clang", 'angle_enable_d3d11=true', 'angle_enable_gl=false', 'angle_enable_vulkan=false',
                       'angle_enable_d3d9=false', 'angle_enable_null=false', 'angle_enable_essl=true', 'angle_enable_glsl=true',
-                      'angle_build_tests=false', 'symbol_level=0')
+                      'angle_build_tests=false', 'symbol_level=0', 'use_custom_libcxx=false', 'treat_warnings_as_errors=false')
             "--- is_clang=$clang" | Out-File $info -Append
             New-Item -ItemType Directory -Force $out | Out-Null
             Set-Content -Path "$out\args.gn" -Value ($args -join "`n")
@@ -97,7 +97,7 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE\*.txt" "$env:GITHUB_WORKSPACE\out\angle-uwp\" -ErrorAction SilentlyContinue
           Set-Location $env:GITHUB_WORKSPACE
           python .github\scripts\annotate_log.py --title "ANGLE build info" --file build.txt --tail 20
-          foreach ($c in 'true') {
+          foreach ($c in 'false') {
             foreach ($k in 'gn','ninja') { if (Test-Path "$k-$c.txt") { python .github\scripts\annotate_log.py --title "$k is_clang=$c" --file "$k-$c.txt" --tail 25 --max-errors 20 } }
           }
           exit 0
