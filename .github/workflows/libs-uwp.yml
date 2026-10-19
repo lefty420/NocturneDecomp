@@ -32,7 +32,7 @@ jobs:
             -DNOCTURNE_SDL_SRC="$sdl" -DNOCTURNE_TTF_SRC="$ttf" "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" -DCMAKE_WARN_DEPRECATED=OFF *> configure.log
           "configure exit: $LASTEXITCODE (generator '$gen', SDK $sdk)" | Out-File build.txt -Append
           if ($LASTEXITCODE -eq 0) {
-            cmake --build b --config Release --target SDL2_ttf -- /m /v:minimal *> msbuild.log
+            cmake --build b --config Release -- /m /v:minimal *> msbuild.log
             "build exit: $LASTEXITCODE" | Out-File build.txt -Append
           }
           New-Item -ItemType Directory -Force out\ttf-uwp | Out-Null
