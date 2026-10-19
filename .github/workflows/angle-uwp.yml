@@ -1,0 +1,91 @@
+name: angle-uwp
+
+# Builds Google's ANGLE (OpenGL ES 3.0 over Direct3D 11) for UWP x64 from source.
+# Heavy (fetches Chromium's build tooling), so it only runs when this file changes
+# or when started by hand. See docs/xbox-uwp.md.
+on:
+  workflow_dispatch:
+  push:
+    branches: [xbox-uwp-gles-groundwork]
+    paths: ['.github/workflows/angle-uwp.yml']
+
+jobs:
+  angle-uwp:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      DEPOT_TOOLS_WIN_TOOLCHAIN: '0'
+      NOCTURNE_ANGLE_COMPILER: msvc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+
+      - name: Get depot_tools
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git $env:RUNNER_TEMP\depot_tools 2>&1 | Out-File dt.txt
+          "$env:RUNNER_TEMP\depot_tools" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          python .github\scripts\annotate_log.py --title "depot_tools" --file dt.txt --tail 6
+
+      - name: Fetch ANGLE sources
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:RUNNER_TEMP\depot_tools;$env:PATH"
+          $env:GIT_CONFIG_COUNT = '0'
+          New-Item -ItemType Directory -Force $env:RUNNER_TEMP\angle-src | Out-Null
+          Set-Location $env:RUNNER_TEMP\angle-src
+          cmd /c "gclient config --unmanaged https://chromium.googlesource.com/angle/angle.git --name angle" *> $env:GITHUB_WORKSPACE\fetch.txt
+          cmd /c "gclient sync --no-history --nohooks -j8 --revision angle@origin/main" *>> $env:GITHUB_WORKSPACE\fetch.txt
+          "sync exit: $LASTEXITCODE" | Out-File $env:GITHUB_WORKSPACE\fetch.txt -Append
+          Set-Location $env:GITHUB_WORKSPACE
+          python .github\scripts\annotate_log.py --title "ANGLE fetch" --file fetch.txt --tail 20
+          exit 0
+
+      - name: Generate and build (winuwp, x64, release)
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:RUNNER_TEMP\depot_tools;$env:PATH"
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $env:GYP_MSVS_OVERRIDE_PATH = $vs
+          $env:GYP_MSVS_VERSION = '2022'
+          $env:vs2022_install = $vs
+          $src = "$env:RUNNER_TEMP\angle-src\angle"
+          Set-Location $src
+          $info = "$env:GITHUB_WORKSPACE\build.txt"
+          "VS: $vs; angle rev: $(git rev-parse --short HEAD 2>&1)" | Out-File $info
+          $built = $false
+          foreach ($clang in 'false', 'true') {
+            $out = "out\uwp-$clang"
+            $args = @('target_os="winuwp"', 'target_cpu="x64"', 'is_debug=false', 'is_component_build=false',
+                      "is_clang=$clang", 'angle_enable_d3d11=true', 'angle_enable_gl=false', 'angle_enable_vulkan=false',
+                      'angle_enable_d3d9=false', 'angle_enable_null=false', 'angle_enable_essl=true', 'angle_enable_glsl=true',
+                      'angle_build_tests=false', 'symbol_level=0')
+            "--- is_clang=$clang" | Out-File $info -Append
+            cmd /c "gn gen $out --args=""$($args -join ' ')""" *>&1 | Out-File "$env:GITHUB_WORKSPACE\gn-$clang.txt"
+            "gn gen exit: $LASTEXITCODE" | Out-File $info -Append
+            if ($LASTEXITCODE -ne 0) { continue }
+            cmd /c "autoninja -C $out libEGL libGLESv2" *>&1 | Out-File "$env:GITHUB_WORKSPACE\ninja-$clang.txt"
+            "autoninja exit: $LASTEXITCODE" | Out-File $info -Append
+            if ($LASTEXITCODE -eq 0) { $built = $true; $env:ANGLE_OUT = $out; break }
+          }
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\out\angle-uwp" | Out-Null
+          if ($built) {
+            Get-ChildItem $env:ANGLE_OUT -Include libEGL.dll, libGLESv2.dll, libEGL.dll.lib, libGLESv2.dll.lib -Recurse |
+              ForEach-Object { Copy-Item $_.FullName "$env:GITHUB_WORKSPACE\out\angle-uwp"; "built: $($_.Name) $($_.Length)" | Out-File $info -Append }
+            Copy-Item -Recurse include "$env:GITHUB_WORKSPACE\out\angle-uwp\include"
+          }
+          Copy-Item "$env:GITHUB_WORKSPACE\*.txt" "$env:GITHUB_WORKSPACE\out\angle-uwp\" -ErrorAction SilentlyContinue
+          Set-Location $env:GITHUB_WORKSPACE
+          python .github\scripts\annotate_log.py --title "ANGLE build info" --file build.txt --tail 20
+          foreach ($c in 'false','true') {
+            foreach ($k in 'gn','ninja') { if (Test-Path "$k-$c.txt") { python .github\scripts\annotate_log.py --title "$k is_clang=$c" --file "$k-$c.txt" --tail 15 } }
+          }
+          exit 0
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: angle-uwp-x64
+          path: out/angle-uwp/
