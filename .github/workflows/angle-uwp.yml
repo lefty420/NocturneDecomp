@@ -77,7 +77,7 @@ jobs:
             $args = @('target_os="winuwp"', 'target_cpu="x64"', 'is_debug=false', 'is_component_build=false',
                       "is_clang=$clang", 'angle_enable_d3d11=true', 'angle_enable_gl=false', 'angle_enable_vulkan=false',
                       'angle_enable_d3d9=false', 'angle_enable_null=false', 'angle_enable_essl=true', 'angle_enable_glsl=true',
-                      'angle_build_tests=false', 'symbol_level=0', 'use_custom_libcxx=false', 'treat_warnings_as_errors=false')
+                      'angle_build_tests=false', 'symbol_level=0', 'use_custom_libcxx=false', 'extra_cflags="/DNTDDI_VERSION=0x0A000000 /D_WIN32_WINNT=0x0A00 /DWINVER=0x0A00"', 'treat_warnings_as_errors=false')
             "--- is_clang=$clang" | Out-File $info -Append
             New-Item -ItemType Directory -Force $out | Out-Null
             Set-Content -Path "$out\args.gn" -Value ($args -join "`n")
