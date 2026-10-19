@@ -66,7 +66,7 @@ jobs:
           Get-Content "$env:GITHUB_WORKSPACE\sdk.txt" | Out-File $info
           "VS: $vs; angle rev: $(git rev-parse --short HEAD 2>&1)" | Out-File $info -Append
           $built = $false
-          foreach ($clang in 'false', 'true') {
+          foreach ($clang in 'true') {
             $out = "out\uwp-$clang"
             $args = @('target_os="winuwp"', 'target_cpu="x64"', 'is_debug=false', 'is_component_build=false',
                       "is_clang=$clang", 'angle_enable_d3d11=true', 'angle_enable_gl=false', 'angle_enable_vulkan=false',
@@ -91,8 +91,8 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE\*.txt" "$env:GITHUB_WORKSPACE\out\angle-uwp\" -ErrorAction SilentlyContinue
           Set-Location $env:GITHUB_WORKSPACE
           python .github\scripts\annotate_log.py --title "ANGLE build info" --file build.txt --tail 20
-          foreach ($c in 'false','true') {
-            foreach ($k in 'gn','ninja') { if (Test-Path "$k-$c.txt") { python .github\scripts\annotate_log.py --title "$k is_clang=$c" --file "$k-$c.txt" --tail 4 --head 25 } }
+          foreach ($c in 'true') {
+            foreach ($k in 'gn','ninja') { if (Test-Path "$k-$c.txt") { python .github\scripts\annotate_log.py --title "$k is_clang=$c" --file "$k-$c.txt" --tail 25 --max-errors 20 } }
           }
           exit 0
 
