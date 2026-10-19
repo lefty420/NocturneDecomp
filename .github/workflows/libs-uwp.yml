@@ -29,7 +29,7 @@ jobs:
           $sdl = "$env:RUNNER_TEMP\sdl" -replace '\\','/'
           $ttf = "$env:RUNNER_TEMP\sdl_ttf" -replace '\\','/'
           cmake -S packaging/uwp/libs-ttf -B b -G "$gen" -A x64 -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION="$sdk" `
-            -DNOCTURNE_SDL_SRC="$sdl" -DNOCTURNE_TTF_SRC="$ttf" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_WARN_DEPRECATED=OFF *> configure.log
+            -DNOCTURNE_SDL_SRC="$sdl" -DNOCTURNE_TTF_SRC="$ttf" "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" -DCMAKE_WARN_DEPRECATED=OFF *> configure.log
           "configure exit: $LASTEXITCODE (generator '$gen', SDK $sdk)" | Out-File build.txt -Append
           if ($LASTEXITCODE -eq 0) {
             cmake --build b --config Release --target SDL2_ttf -- /m /v:minimal *> msbuild.log
