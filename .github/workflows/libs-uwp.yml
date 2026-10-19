@@ -1,6 +1,6 @@
 name: libs-uwp
 
-# UWP builds of the third-party libraries the game needs (SDL2_ttf + FreeType now; FFmpeg later).
+# UWP builds of the third-party libraries the game needs (SDL2_ttf + FreeType, FFmpeg).
 on:
   workflow_dispatch:
   push:
@@ -48,3 +48,62 @@ jobs:
         with:
           name: sdl2-ttf-uwp-x64
           path: out/ttf-uwp/
+
+  ffmpeg-uwp:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          uwp: true
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          path-type: inherit
+          install: make diffutils pkgconf
+      - name: Fetch FFmpeg
+        shell: pwsh
+        run: git clone -q --depth 1 -b n6.1.1 https://github.com/FFmpeg/FFmpeg "$env:RUNNER_TEMP\ffmpeg"
+      - name: Configure, build, install (static, UWP x64)
+        shell: msys2 {0}
+        run: |
+          # MSYS's own link.exe would shadow MSVC's
+          rm -f /usr/bin/link.exe
+          cd "$(cygpath "$RUNNER_TEMP")/ffmpeg"
+          PREFIX="$(cygpath "$RUNNER_TEMP")/ffout"
+          {
+            echo "cl: $(which cl) ; link: $(which link)"
+            echo "LIBPATH: ${LIBPATH:0:200}"
+          } > "$GITHUB_WORKSPACE/ff-env.txt"
+          ./configure --prefix="$PREFIX" --toolchain=msvc --arch=x86_64 --target-os=win32 --enable-cross-compile \
+            --enable-static --disable-shared --disable-programs --disable-doc --disable-network --disable-debug \
+            --disable-x86asm --disable-autodetect --disable-d3d11va --disable-dxva2 --disable-avdevice --disable-postproc \
+            --extra-cflags="-MD -DWINAPI_FAMILY=WINAPI_FAMILY_APP -D_WIN32_WINNT=0x0A00" \
+            --extra-ldflags="-APPCONTAINER WindowsApp.lib" > "$GITHUB_WORKSPACE/ff-configure.log" 2>&1
+          echo "configure exit: $?" >> "$GITHUB_WORKSPACE/ff-env.txt"
+          tail -n 40 ffbuild/config.log > "$GITHUB_WORKSPACE/ff-configlog-tail.log" 2>/dev/null || true
+          if grep -q "configure exit: 0" "$GITHUB_WORKSPACE/ff-env.txt"; then
+            make -j4 > "$GITHUB_WORKSPACE/ff-make.log" 2>&1
+            echo "make exit: $?" >> "$GITHUB_WORKSPACE/ff-env.txt"
+            make install > "$GITHUB_WORKSPACE/ff-install.log" 2>&1
+            echo "install exit: $?" >> "$GITHUB_WORKSPACE/ff-env.txt"
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/out/ffmpeg-uwp"
+          cp -r "$PREFIX/include" "$PREFIX/lib" "$GITHUB_WORKSPACE/out/ffmpeg-uwp/" 2>/dev/null || true
+          ls -l "$PREFIX/lib" 2>/dev/null | head -20 >> "$GITHUB_WORKSPACE/ff-env.txt" || true
+          cp "$GITHUB_WORKSPACE"/ff-*.log "$GITHUB_WORKSPACE/ff-env.txt" "$GITHUB_WORKSPACE/out/ffmpeg-uwp/" 2>/dev/null || true
+      - name: Report
+        if: always()
+        shell: pwsh
+        run: |
+          python .github\scripts\annotate_log.py --title "FFmpeg UWP" --file ff-env.txt --tail 22
+          if (Test-Path ff-configure.log) { python .github\scripts\annotate_log.py --title "ffmpeg configure" --file ff-configure.log --tail 14 }
+          if (Test-Path ff-configlog-tail.log) { python .github\scripts\annotate_log.py --title "ffmpeg config.log" --file ff-configlog-tail.log --tail 25 }
+          if (Test-Path ff-make.log) { python .github\scripts\annotate_log.py --title "ffmpeg make" --file ff-make.log --tail 12 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ffmpeg-uwp-x64
+          path: out/ffmpeg-uwp/
