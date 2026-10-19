@@ -86,6 +86,11 @@ jobs:
             if ($LASTEXITCODE -ne 0) { continue }
             cmd /c "autoninja -C $out libEGL libGLESv2" *>&1 | Out-File "$env:GITHUB_WORKSPACE\ninja-$clang.txt"
             "autoninja exit: $LASTEXITCODE" | Out-File $info -Append
+            if ($LASTEXITCODE -ne 0 -and (Test-Path "$out\siso_failed_commands.bat")) {
+              $cmdline = (Get-Content "$out\siso_failed_commands.bat" | Where-Object { $_ -match 'cl\.exe' } | Select-Object -First 1)
+              ($cmdline -split ' ' | Where-Object { $_ -match '^[/-](D|FI|U|I)' -and $_ -notmatch '^[/-]I' }) -join "`n" | Out-File "$env:GITHUB_WORKSPACE\defs.txt"
+              python "$env:GITHUB_WORKSPACE\.github\scripts\annotate_log.py" --title "failing cl defines" --file "$env:GITHUB_WORKSPACE\defs.txt" --tail 60
+            }
             if ($LASTEXITCODE -eq 0) { $built = $true; $env:ANGLE_OUT = $out; break }
           }
           New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\out\angle-uwp" | Out-Null
