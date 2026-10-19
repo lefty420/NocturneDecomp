@@ -65,6 +65,12 @@ jobs:
           $info = "$env:GITHUB_WORKSPACE\build.txt"
           Get-Content "$env:GITHUB_WORKSPACE\sdk.txt" | Out-File $info
           "VS: $vs; angle rev: $(git rev-parse --short HEAD 2>&1)" | Out-File $info -Append
+          $diag = "$env:GITHUB_WORKSPACE\diag.txt"
+          "llvm-build: $(Test-Path third_party\llvm-build\Release+Asserts\bin\clang-cl.exe)" | Out-File $diag
+          Get-ChildItem third_party\llvm-build -ErrorAction SilentlyContinue | ForEach-Object { $_.Name } | Out-File $diag -Append
+          Select-String -Path build\toolchain\win\*.gn, build\config\BUILDCONFIG.gn, build\config\compiler\compiler.gni, build\config\clang\clang.gni -Pattern 'winuwp|uwp' |
+            ForEach-Object { "$($_.Filename):$($_.LineNumber): $($_.Line.Trim())" } | Select-Object -First 25 | Out-File $diag -Append
+          python "$env:GITHUB_WORKSPACE\.github\scripts\annotate_log.py" --title "ANGLE build-config diag" --file $diag --tail 40
           $built = $false
           foreach ($clang in 'true') {
             $out = "out\uwp-$clang"
