@@ -63,7 +63,9 @@ jobs:
                       'angle_enable_d3d9=false', 'angle_enable_null=false', 'angle_enable_essl=true', 'angle_enable_glsl=true',
                       'angle_build_tests=false', 'symbol_level=0')
             "--- is_clang=$clang" | Out-File $info -Append
-            cmd /c "gn gen $out --args=""$($args -join ' ')""" *>&1 | Out-File "$env:GITHUB_WORKSPACE\gn-$clang.txt"
+            New-Item -ItemType Directory -Force $out | Out-Null
+            Set-Content -Path "$out\args.gn" -Value ($args -join "`n")
+            cmd /c "gn gen $out" *>&1 | Out-File "$env:GITHUB_WORKSPACE\gn-$clang.txt"
             "gn gen exit: $LASTEXITCODE" | Out-File $info -Append
             if ($LASTEXITCODE -ne 0) { continue }
             cmd /c "autoninja -C $out libEGL libGLESv2" *>&1 | Out-File "$env:GITHUB_WORKSPACE\ninja-$clang.txt"
