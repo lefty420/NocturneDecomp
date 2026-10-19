@@ -1,0 +1,50 @@
+name: libs-uwp
+
+# UWP builds of the third-party libraries the game needs (SDL2_ttf + FreeType now; FFmpeg later).
+on:
+  workflow_dispatch:
+  push:
+    branches: [xbox-uwp-gles-groundwork]
+    paths: ['.github/workflows/libs-uwp.yml', 'packaging/uwp/libs-ttf/**']
+
+jobs:
+  sdl-ttf-uwp:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch SDL2 headers and SDL2_ttf (with FreeType/HarfBuzz)
+        shell: pwsh
+        run: |
+          git clone -q --depth 1 -b release-2.30.0 https://github.com/libsdl-org/SDL "$env:RUNNER_TEMP\sdl"
+          git clone -q --depth 1 --recurse-submodules --shallow-submodules -b release-2.22.0 https://github.com/libsdl-org/SDL_ttf "$env:RUNNER_TEMP\sdl_ttf" 2>&1 | Out-File fetch.txt
+          Get-ChildItem "$env:RUNNER_TEMP\sdl_ttf\external" | ForEach-Object { "external: $($_.Name) $((Get-ChildItem $_.FullName | Measure-Object).Count) entries" } | Out-File fetch.txt -Append
+          python .github\scripts\annotate_log.py --title "SDL_ttf fetch" --file fetch.txt --tail 12
+      - name: Configure and build for UWP (static, x64, Release)
+        shell: pwsh
+        run: |
+          $gens = (cmake --help | Select-String -Pattern '^\*?\s+(Visual Studio \d+ \d+)' | ForEach-Object { $_.Matches[0].Groups[1].Value })
+          "generators: $($gens -join ', ')" | Out-File build.txt
+          $gen = $gens | Select-Object -First 1
+          $sdk = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" | Where-Object { $_.Name -match '^10\.' } | Sort-Object Name | Select-Object -Last 1).Name
+          $sdl = "$env:RUNNER_TEMP\sdl" -replace '\\','/'
+          $ttf = "$env:RUNNER_TEMP\sdl_ttf" -replace '\\','/'
+          cmake -S packaging/uwp/libs-ttf -B b -G "$gen" -A x64 -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION="$sdk" `
+            -DNOCTURNE_SDL_SRC="$sdl" -DNOCTURNE_TTF_SRC="$ttf" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_WARN_DEPRECATED=OFF *> configure.log
+          "configure exit: $LASTEXITCODE (generator '$gen', SDK $sdk)" | Out-File build.txt -Append
+          if ($LASTEXITCODE -eq 0) {
+            cmake --build b --config Release --target SDL2_ttf -- /m /v:minimal *> msbuild.log
+            "build exit: $LASTEXITCODE" | Out-File build.txt -Append
+          }
+          New-Item -ItemType Directory -Force out\ttf-uwp | Out-Null
+          Get-ChildItem b -Recurse -Include *.lib | ForEach-Object { Copy-Item $_.FullName out\ttf-uwp; "lib: $($_.Name) $($_.Length)" | Out-File build.txt -Append }
+          Copy-Item "$env:RUNNER_TEMP\sdl_ttf\SDL_ttf.h" out\ttf-uwp -ErrorAction SilentlyContinue
+          Copy-Item *.log, build.txt out\ttf-uwp
+          python .github\scripts\annotate_log.py --title "SDL_ttf UWP build" --file build.txt --tail 14
+          if (Test-Path configure.log) { python .github\scripts\annotate_log.py --title "configure" --file configure.log --tail 12 }
+          if (Test-Path msbuild.log) { python .github\scripts\annotate_log.py --title "msbuild" --file msbuild.log --tail 12 }
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdl2-ttf-uwp-x64
+          path: out/ttf-uwp/
