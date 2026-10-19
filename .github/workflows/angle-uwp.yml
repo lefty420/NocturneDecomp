@@ -55,8 +55,16 @@ jobs:
           $env:vs2022_install = $vs
           $src = "$env:RUNNER_TEMP\angle-src\angle"
           Set-Location $src
+          # Chromium's toolchain scripts pin a newer Windows SDK than the runner has: use the installed one.
+          $sdk = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" | Where-Object { $_.Name -match '^10\.' } | Sort-Object Name | Select-Object -Last 1).Name
+          $pinned = Select-String -Path build\vs_toolchain.py -Pattern "10\.0\.\d+\.0" -AllMatches | ForEach-Object { $_.Matches.Value } | Sort-Object -Unique
+          "installed SDK $sdk; pinned in vs_toolchain.py: $($pinned -join ', ')" | Out-File "$env:GITHUB_WORKSPACE\sdk.txt"
+          foreach ($f in 'build\vs_toolchain.py', 'build\toolchain\win\setup_toolchain.py') {
+            (Get-Content $f -Raw) -replace '10\.0\.\d+\.0', $sdk | Set-Content $f -NoNewline
+          }
           $info = "$env:GITHUB_WORKSPACE\build.txt"
-          "VS: $vs; angle rev: $(git rev-parse --short HEAD 2>&1)" | Out-File $info
+          Get-Content "$env:GITHUB_WORKSPACE\sdk.txt" | Out-File $info
+          "VS: $vs; angle rev: $(git rev-parse --short HEAD 2>&1)" | Out-File $info -Append
           $built = $false
           foreach ($clang in 'false', 'true') {
             $out = "out\uwp-$clang"
