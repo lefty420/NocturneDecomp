@@ -24,6 +24,8 @@ built or linked, and nothing runs.
 
 ANGLE notes: Microsoft's `ANGLE.WindowsStore` NuGet package is built from an old ES 2.0 fork, so it is not used (the renderer needs ES 3.0). Chromium's UWP toolchain only drives MSVC `cl.exe`, so the build uses `is_clang=false` with `use_custom_libcxx=false`, points the pinned Windows SDK version at the one on the runner, and replaces the symbolic `NTDDI_VERSION` in Chromium's build config with a number.
 
+| `sdl-ttf-uwp` (workflow `.github/workflows/libs-uwp.yml`) | SDL2_ttf 2.22.0 with its vendored FreeType, built static for UWP x64 (CMake `WindowsStore`, Visual Studio generator) | builds: `SDL2_ttf.lib` (~140 KB) and `freetype.lib` (~2.1 MB), saved as the `sdl2-ttf-uwp-x64` artifact. HarfBuzz is not enabled (SDL_ttf 2.22 leaves it off by default). Not linked or run |
+
 The jobs report results as run annotations, and the full logs are attached to each run as
 artifacts. To re-run the game-source check over every file, start the workflow by hand
 (Actions tab, `xbox-uwp`, Run workflow) with `stride` set to `1`; it takes about an hour.
@@ -84,8 +86,7 @@ Not checked: a full link, or a run, of either mode.
 
 1. **Build the libraries for UWP.** The build compiles SDL2, SDL2_ttf and FFmpeg from source
    for MSYS2/mingw (`cmake/bundledlibs.cmake`); none of that targets UWP. SDL2 (its WinRT port)
-   now builds in CI (see above). ANGLE (ES 3.0) now builds too (see above). Still needed: UWP builds of SDL2_ttf (which needs
-   FreeType) and FFmpeg (for the FMV), and checking that SDL's WinRT backend picks up this ANGLE.
+   now builds in CI (see above). ANGLE (ES 3.0) now builds too (see above). SDL2_ttf + FreeType build too. Still needed: a UWP build of FFmpeg (for the FMV), and checking that SDL's WinRT backend picks up this ANGLE.
 2. **App shell.** UWP needs a WinRT app entry. SDL2's WinRT support does this with a C++/CX
    project compiled by MSVC (`/ZW`), so the realistic layout is an MSVC shell project that links
    a static library of the game built with `WINAPI_FAMILY_APP`. `packaging/uwp/Package.appxmanifest`
