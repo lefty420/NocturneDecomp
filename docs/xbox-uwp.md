@@ -15,7 +15,7 @@ built or linked, and nothing runs.
 |---|---|---|
 | `gles-syntax` | the GL files compile in desktop and ES modes | passes |
 | `uwp-probe` | a Windows runner can compile (clang-cl, `WINAPI_FAMILY_APP`) and link (`/APPCONTAINER`, `WindowsApp.lib`) a small program | passes |
-| `uwp-shim-compile` | every file under `shims/` compiles with clang-cl under `WINAPI_FAMILY_APP` in ES mode | 107 of 108 files clean; `win32/mci_video.cpp` fails only because FFmpeg headers are not on the runner |
+| `uwp-shim-compile` | every file under `shims/` compiles with clang-cl under `WINAPI_FAMILY_APP` in ES mode | 107 of 108 files clean in this job; the 108th, `win32/mci_video.cpp`, needs FFmpeg headers and compiles with 0 errors in the `ffmpeg-uwp` job, so all 108 compile |
 
 | `uwp-game-compile` | the decompiled game sources (`src/`, `main/`, `checks/`: 6,604 files after the build's per-function source selection) compile under the same settings | a full run over all 6,604 files found 2 failures (editor `chdir`, `sleep`), now fixed; the default run samples every 20th file plus those two as regression guards, and is clean |
 | `sdl-uwp-build` | SDL2 builds for UWP (x64 Release) from SDL's own `VisualC-WinRT/SDL-UWP.vcxproj` | builds: `SDL2.dll`, ~1.35 MB, saved as the `sdl2-uwp-x64` artifact. Needs toolset `v145` (the runner has Visual Studio 18); the project's own `v143` is not present there |
@@ -25,6 +25,8 @@ built or linked, and nothing runs.
 ANGLE notes: Microsoft's `ANGLE.WindowsStore` NuGet package is built from an old ES 2.0 fork, so it is not used (the renderer needs ES 3.0). Chromium's UWP toolchain only drives MSVC `cl.exe`, so the build uses `is_clang=false` with `use_custom_libcxx=false`, points the pinned Windows SDK version at the one on the runner, and replaces the symbolic `NTDDI_VERSION` in Chromium's build config with a number.
 
 | `sdl-ttf-uwp` (workflow `.github/workflows/libs-uwp.yml`) | SDL2_ttf 2.22.0 with its vendored FreeType, built static for UWP x64 (CMake `WindowsStore`, Visual Studio generator) | builds: `SDL2_ttf.lib` (~140 KB) and `freetype.lib` (~2.1 MB), saved as the `sdl2-ttf-uwp-x64` artifact. HarfBuzz is not enabled (SDL_ttf 2.22 leaves it off by default). Not linked or run |
+
+| `ffmpeg-uwp` (workflow `libs-uwp.yml`) | FFmpeg 6.1.1 built static for UWP x64 (MSVC toolchain, `WINAPI_FAMILY_APP`, `-APPCONTAINER`), network/programs/devices off | builds: `libavcodec`, `libavformat`, `libavutil`, `libswscale`, `libswresample` (plus `libavfilter`, unused) and headers, saved as the `ffmpeg-uwp-x64` artifact; also checks `mci_video.cpp` compiles against those headers (0 errors). Not linked or run |
 
 The jobs report results as run annotations, and the full logs are attached to each run as
 artifacts. To re-run the game-source check over every file, start the workflow by hand
@@ -86,7 +88,7 @@ Not checked: a full link, or a run, of either mode.
 
 1. **Build the libraries for UWP.** The build compiles SDL2, SDL2_ttf and FFmpeg from source
    for MSYS2/mingw (`cmake/bundledlibs.cmake`); none of that targets UWP. SDL2 (its WinRT port)
-   now builds in CI (see above). ANGLE (ES 3.0) now builds too (see above). SDL2_ttf + FreeType build too. Still needed: a UWP build of FFmpeg (for the FMV), and checking that SDL's WinRT backend picks up this ANGLE.
+   now builds in CI (see above). ANGLE (ES 3.0) now builds too (see above). SDL2_ttf + FreeType build too. FFmpeg builds too. Still needed: checking that SDL's WinRT backend picks up this ANGLE.
 2. **App shell.** UWP needs a WinRT app entry. SDL2's WinRT support does this with a C++/CX
    project compiled by MSVC (`/ZW`), so the realistic layout is an MSVC shell project that links
    a static library of the game built with `WINAPI_FAMILY_APP`. `packaging/uwp/Package.appxmanifest`
