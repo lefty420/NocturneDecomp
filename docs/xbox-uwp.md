@@ -110,6 +110,17 @@ Not checked: a full link, or a run, of either mode.
    Xbox One and Series X|S. Check the current limits for your console in Microsoft's docs and
    measure the game's peak usage, including the FMV decoder.
 
+## The launcher app (`packaging/uwp/launcher`)
+
+A controller-driven front screen that runs before the game: **Play**, **Game files**, **Settings**, **About** (LB/RB switch tabs, A selects, B goes back). It is plain SDL2 (no game code), so it runs before the game's renderer exists.
+
+- **Game files** checks the folders the game expects (`art`, `models`, `world`, `data`, `backdrop`, and the optional `video` intro) in the app's local folder, shows what is present or missing, and has an import flow with progress, cancel and plain-language errors. Play stays locked until the required folders are there.
+- **Import routes** (C++/CX, `src/imports_platform_uwp.cpp`): the system folder picker and removable (USB) storage. Both go through WinRT storage rather than file paths, because Xbox only exposes picked folders through the broker. Microsoft documents folder pickers as unsupported on Xbox (see the next section), so each failure is reported on screen, and Device Portal's file explorer remains the route that needs no code.
+- **Settings** are stored in `launcher.ini` and read by the game at run time through `shims/core/launcher_settings.*` (stick deadzone, turn speed, look speed, invert look, with a live stick preview).
+- **CI** (`.github/workflows/launcher.yml`): one job runs the launcher on Linux with a software renderer, drives every screen and a full import against temporary folders, and saves screenshots (artifact `launcher-screenshots`); the other compiles it for UWP, including the C++/CX providers.
+
+Status: the Linux run passes. The UWP compile passes for every launcher file including the C++/CX importers. Nothing has run on a console, so which import route actually works on your Xbox is not known yet.
+
 ## What Xbox UWP restricts (from Microsoft's docs and community reports)
 
 Sources: Microsoft's [UWP limitations on Xbox](https://github.com/MicrosoftDocs/winrt-related/blob/docs/winrt-related-src/extension-sdks/uwp-limitations-on-xbox.md) page (dated 2020, so possibly stale), and a [Microsoft Q&A thread](https://learn.microsoft.com/en-in/answers/questions/573133/file-and-folder-picker-usage-policies-on-xbox-cons) (2021-2024). Nothing below has been tested by us on a console.

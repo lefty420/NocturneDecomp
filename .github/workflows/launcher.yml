@@ -68,7 +68,7 @@ jobs:
           $R = "$PWD\annotations\nocedit.exe\pseudocode\shims"
           $L = "$PWD\packaging\uwp\launcher"
           $sdl = "$env:RUNNER_TEMP\sdl\include"
-          $common = @('/nologo','/c','/std:c++17','/EHsc','/utf-8','/DWINAPI_FAMILY=WINAPI_FAMILY_APP','/D_WIN32_WINNT=0x0A00',"/I$R","/I$sdl",'/Fo:NUL')
+          $common = @('/nologo','/c','/std:c++17','/EHsc','/utf-8','/DWINAPI_FAMILY=WINAPI_FAMILY_APP','/D_WIN32_WINNT=0x0A00',"/I$R","/I$R\..\include","/I$sdl",'/Fo:NUL')
           $plain = @("$L\src\gfx.cpp","$L\src\app.cpp","$L\src\game_files.cpp","$L\src\imports.cpp","$L\src\imports_platform_default.cpp",
                      "$L\src\settings_store.cpp","$L\src\launcher_main.cpp","$R\core\launcher_settings.cpp","$R\core\data_root.cpp","$R\game\gamepad.cpp")
           $rows = @()
