@@ -1,58 +1,83 @@
-// =============================================================================
-// GFX — the few drawing primitives the launcher needs, on SDL_Renderer
-// =============================================================================
-//
-// SDL_Renderer is used (not the game's OpenGL path) so the launcher runs before
-// the game's renderer exists, and on UWP it rides SDL's Direct3D 11 backend.
-// Text is rasterised by stb_truetype into an alpha atlas per font size.
+// Small 2D drawing layer for the launcher: text (stb_truetype), rounded boxes,
+// gradients and procedurally drawn icons, all on top of SDL_Renderer so it runs
+// unchanged on desktop and on UWP (where SDL_Renderer is Direct3D 11).
 #pragma once
 #include <SDL.h>
+
+#include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
-namespace launcher {
+namespace nl {
 
-struct Color { Uint8 r, g, b, a; };
-inline Color rgba(unsigned hex, Uint8 a = 255) { return {(Uint8)(hex >> 16), (Uint8)(hex >> 8), (Uint8)hex, a}; }
-inline Color with_alpha(Color c, Uint8 a) { c.a = a; return c; }
-Color mix(Color a, Color b, float t);
+struct Color {
+    uint8_t r, g, b, a;
+};
+constexpr Color rgb(int r, int g, int b, int a = 255) {
+    return Color{(uint8_t)r, (uint8_t)g, (uint8_t)b, (uint8_t)a};
+}
+inline Color with_alpha(Color c, int a) { return Color{c.r, c.g, c.b, (uint8_t)a}; }
 
-class Font {
+enum class Weight { Regular = 0, Medium = 1, Bold = 2 };
+
+enum class Icon { Check, Cross, Play, Folder, Sliders, Info, ChevLeft, ChevRight, Drive, Refresh, Warning, Gamepad };
+
+class Gfx {
 public:
-    Font() {}
-    ~Font();
-    // `ttf` must outlive the Font. `px` is the pixel height.
-    bool init(SDL_Renderer *r, const unsigned char *ttf, float px);
-    // Width of `s` in pixels, with extra spacing between letters.
-    float width(const std::string &s, float tracking = 0) const;
-    float lineHeight() const { return lineH_; }
-    float ascent() const { return ascent_; }
-    // y is the top of the line.
-    void draw(SDL_Renderer *r, const std::string &s, float x, float y, Color c, float tracking = 0) const;
-    // Greedy word wrap into lines no wider than maxW.
-    std::vector<std::string> wrap(const std::string &s, float maxW) const;
+    ~Gfx() { shutdown(); }
+
+    // Loads Poppins-{Regular,Medium,Bold}.ttf from `font_dir`. False if one is missing.
+    bool init(SDL_Renderer *renderer, const std::string &font_dir);
+    void shutdown();
+
+    // Physical pixels per logical pixel (output height / logical height). Text and
+    // icons are rasterised at physical size so they stay sharp at 4K.
+    void set_scale(float physical_per_logical);
+    float scale() const { return scale_; }
+
+    // Text. `y` is the top of the line box; sizes are logical pixels.
+    int text_width(const std::string &s, int px, Weight w, int spacing = 0);
+    int line_height(int px, Weight w);
+    void text(const std::string &s, int x, int y, int px, Weight w, Color c, int spacing = 0);
+    void text_right(const std::string &s, int right, int y, int px, Weight w, Color c, int spacing = 0);
+    void text_center(const std::string &s, int cx, int y, int px, Weight w, Color c, int spacing = 0);
+    std::vector<std::string> wrap(const std::string &s, int px, Weight w, int max_w);
+
+    // Shapes (logical pixels).
+    void rect(int x, int y, int w, int h, Color c);
+    void round_rect(int x, int y, int w, int h, int r, Color c);
+    void circle(int cx, int cy, int r, Color c);
+    void gradient_v(int x, int y, int w, int h, Color top, Color bottom);
+    void glow(int cx, int cy, int radius, Color c);
+    void crescent(int cx, int cy, int r, Color c);
+    void icon(Icon i, int x, int y, int size, Color c);
+
+    SDL_Renderer *renderer() const { return r_; }
 
 private:
-    struct Glyph { float x0, y0, x1, y1; float u0, v0, u1, v1; float adv; bool ok; };
-    SDL_Texture *tex_ = nullptr;
-    Glyph glyphs_[96 + 8];
-    float lineH_ = 0, ascent_ = 0;
-    int glyphIndex(unsigned cp) const;
+    struct Atlas {
+        SDL_Texture *tex = nullptr;
+        int w = 0, h = 0;
+        float ascent = 0, descent = 0, line_gap = 0;
+        std::vector<unsigned char> baked;   // stbtt_bakedchar[96]
+    };
+    struct FontData;
+    Atlas *atlas(Weight w, int px_physical);
+    SDL_Texture *corner_texture(int r_physical);
+    SDL_Texture *soft_circle_texture();
+    SDL_Texture *crescent_texture();
+    SDL_Texture *icon_texture(Icon i);
+    void free_caches();
+
+    SDL_Renderer *r_ = nullptr;
+    float scale_ = 1.0f;
+    std::vector<FontData *> fonts_;
+    std::map<int, Atlas *> atlases_;   // key: weight * 100000 + px
+    std::map<int, SDL_Texture *> corners_;
+    std::map<int, SDL_Texture *> icons_;
+    SDL_Texture *soft_ = nullptr;
+    SDL_Texture *crescent_ = nullptr;
 };
 
-void fill_rect(SDL_Renderer *r, float x, float y, float w, float h, Color c);
-void fill_round_rect(SDL_Renderer *r, float x, float y, float w, float h, float radius, Color c);
-void stroke_round_rect(SDL_Renderer *r, float x, float y, float w, float h, float radius, float thickness, Color c);
-// Vertical gradient from `top` to `bottom`.
-void fill_gradient(SDL_Renderer *r, float x, float y, float w, float h, Color top, Color bottom);
-void fill_circle(SDL_Renderer *r, float cx, float cy, float radius, Color c);
-// A soft dark edge around the whole screen.
-void draw_vignette(SDL_Renderer *r, int w, int h, Uint8 strength);
-
-// Small glyphs drawn as shapes so they do not depend on the font having them.
-void draw_check(SDL_Renderer *r, float cx, float cy, float size, Color c);
-void draw_cross(SDL_Renderer *r, float cx, float cy, float size, Color c);
-void draw_dash(SDL_Renderer *r, float cx, float cy, float size, Color c);
-void draw_chevron(SDL_Renderer *r, float cx, float cy, float size, bool right, Color c);
-
-}  // namespace launcher
+}  // namespace nl

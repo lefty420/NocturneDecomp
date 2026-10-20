@@ -1,136 +1,207 @@
 #include "importer.h"
 
-#include "gamefiles.h"
-
+#include <algorithm>
+#include <atomic>
 #include <cstdio>
-#include <filesystem>
-#include <fstream>
+#include <mutex>
+#include <thread>
 
-namespace fs = std::filesystem;
+#include "fs_util.h"
 
-namespace launcher {
+namespace nl {
 
-bool copy_file_with_progress(const std::string &from, const std::string &to, const std::atomic<bool> &cancel,
-                             uint64_t &bytesDone, std::string &error) {
-    std::ifstream in(from, std::ios::binary);
-    if (!in) { error = "Could not read " + from; return false; }
-    std::error_code ec;
-    fs::create_directories(fs::path(to).parent_path(), ec);
-    std::ofstream out(to, std::ios::binary | std::ios::trunc);
-    if (!out) { error = "Could not write " + to; return false; }
-    std::vector<char> buf(1 << 20);
-    while (in) {
-        if (cancel.load()) return false;
-        in.read(buf.data(), (std::streamsize)buf.size());
-        std::streamsize n = in.gcount();
-        if (n > 0) {
-            out.write(buf.data(), n);
-            if (!out) { error = "Out of space writing " + to; return false; }
-            bytesDone += (uint64_t)n;
-        }
+bool import_skip(const std::string &name) {
+    static const char *deny[] = {".exe", ".dll", ".ocx", ".scr", ".cab", ".inf", ".url", ".lnk", ".hlp", ".chm", ".tmp", ".part", ".db"};
+    std::string l = lower(name);
+    for (const char *d : deny) {
+        size_t n = std::char_traits<char>::length(d);
+        if (l.size() >= n && l.compare(l.size() - n, n, d) == 0) return true;
     }
-    return true;
+    return false;
 }
 
-DirImporter::DirImporter(std::string destRoot, std::vector<Source> sources)
-    : dest_(std::move(destRoot)), sources_(std::move(sources)) {}
-
-DirImporter::~DirImporter() {
-    cancel_ = true;
-    if (worker_.joinable()) worker_.join();
-}
-
-std::vector<ImportMethod> DirImporter::methods() {
-    std::vector<ImportMethod> m;
-    for (auto &s : sources_) m.push_back(s.method);
-    return m;
-}
-
-ImportStatus DirImporter::status() {
-    std::lock_guard<std::mutex> lk(mu_);
-    return st_;
-}
-
-void DirImporter::cancel() { cancel_ = true; }
-
-void DirImporter::start(const std::string &methodId) {
-    if (worker_.joinable()) worker_.join();
-    for (auto &s : sources_) {
-        if (s.method.id == methodId) {
-            cancel_ = false;
-            {
-                std::lock_guard<std::mutex> lk(mu_);
-                st_ = ImportStatus();
-                st_.state = ImportStatus::Copying;
-                st_.message = "Looking for the game files...";
-            }
-            worker_ = std::thread([this, p = s.path] { run(p); });
-            return;
-        }
-    }
-}
-
-void DirImporter::run(std::string srcPath) {
-    auto fail = [&](const std::string &msg) {
-        std::lock_guard<std::mutex> lk(mu_);
-        st_.state = ImportStatus::Failed;
-        st_.message = msg;
+std::string import_dest_for_loose(const std::string &name) {
+    std::string l = lower(name);
+    auto ends = [&](const char *e) {
+        size_t n = std::char_traits<char>::length(e);
+        return l.size() >= n && l.compare(l.size() - n, n, e) == 0;
     };
+    if (ends(".avi")) return "video/" + name;
+    if (ends(".ini")) return "system/" + name;
+    return name;
+}
 
-    std::string root = find_game_root(srcPath);
-    if (root.empty()) {
-        fail("No Nocturne game folders (art, models, data, sound) were found in that location.");
-        return;
-    }
+namespace {
 
-    // First pass: what is there, so the progress bar means something.
-    struct Item { fs::path from; fs::path rel; uint64_t size; };
-    std::vector<Item> items;
-    uint64_t total = 0;
+bool holds_pods(const std::string &dir) { return !find_ci(dir, "ACT1.POD").empty() || !find_ci(dir, "ENEMY.POD").empty(); }
+
+std::string find_game_root(const std::string &dir, int depth) {
+    if (holds_pods(dir)) return dir;
+    if (depth <= 0) return std::string();
     std::error_code ec;
-    for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
-        std::error_code fec;
-        if (!it->is_regular_file(fec)) continue;
-        uint64_t sz = (uint64_t)it->file_size(fec);
-        items.push_back({it->path(), fs::relative(it->path(), root, fec), sz});
-        total += sz;
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code e2;
+        if (!it->is_directory(e2)) continue;
+        std::string r = find_game_root(it->path().string(), depth - 1);
+        if (!r.empty()) return r;
     }
-    {
-        std::lock_guard<std::mutex> lk(mu_);
-        st_.bytesTotal = total;
-        st_.filesTotal = (int)items.size();
+    return std::string();
+}
+
+}  // namespace
+
+ImportPlan plan_folder_import(const std::string &src_root) {
+    ImportPlan plan;
+    std::error_code ec;
+    if (src_root.empty() || !fs::is_directory(src_root, ec)) {
+        plan.error = "That folder can't be read.";
+        return plan;
+    }
+    plan.game_root = find_game_root(src_root, 3);
+    if (plan.game_root.empty()) {
+        plan.error = "No ACT1.POD or ENEMY.POD found in that folder (looked three levels down). Pick the folder that holds the game's .POD files.";
+        return plan;
+    }
+    fs::path base(plan.game_root);
+    for (fs::recursive_directory_iterator it(base, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end;
+         it.increment(ec)) {
+        std::error_code e2;
+        if (!it->is_regular_file(e2)) continue;
+        std::string name = it->path().filename().string();
+        if (import_skip(name)) continue;
+        PlanItem item;
+        item.src = it->path().string();
+        item.rel = it->path().lexically_relative(base).generic_string();
+        item.size = (uint64_t)it->file_size(e2);
+        plan.total_bytes += item.size;
+        plan.items.push_back(std::move(item));
+    }
+    if (plan.items.empty()) plan.error = "The folder has no game files to copy.";
+    return plan;
+}
+
+namespace {
+
+class FolderImportService : public ImportService {
+public:
+    FolderImportService(std::string root, std::string source) : root_(std::move(root)), source_(std::move(source)) {}
+    ~FolderImportService() override {
+        cancel_flag_ = true;
+        if (worker_.joinable()) worker_.join();
     }
 
-    uint64_t done = 0;
-    int n = 0;
-    for (auto &it : items) {
-        if (cancel_.load()) {
-            std::lock_guard<std::mutex> lk(mu_);
-            st_.state = ImportStatus::Cancelled;
-            st_.message = "Import cancelled. Files copied so far were kept.";
-            return;
-        }
+    std::vector<ImportMethod> methods() override {
+        ImportMethod m;
+        m.id = "folder";
+        m.label = "Copy from a folder";
+        m.description = "Copy a game folder that is already on this device";
+        std::error_code ec;
+        m.available = !source_.empty() && fs::is_directory(source_, ec);
+        if (!m.available) m.unavailable_reason = "No source folder was given.";
+        return {m};
+    }
+
+    void start(const std::string &) override {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (p_.state == ImportState::Working) return;
+        if (worker_.joinable()) worker_.join();
+        p_ = ImportProgress();
+        p_.state = ImportState::Working;
+        cancel_flag_ = false;
+        worker_ = std::thread([this] { run(); });
+    }
+
+    ImportProgress progress() override {
+        std::lock_guard<std::mutex> lk(mu_);
+        return p_;
+    }
+    void cancel() override { cancel_flag_ = true; }
+    void reset() override {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (p_.state != ImportState::Working) p_ = ImportProgress();
+    }
+
+private:
+    void finish(ImportState s, const std::string &msg) {
+        std::lock_guard<std::mutex> lk(mu_);
+        p_.state = s;
+        p_.message = msg;
+        p_.current.clear();
+    }
+
+    void run() {
+        ImportPlan plan = plan_folder_import(source_);
+        if (!plan.error.empty()) return finish(ImportState::Failed, plan.error);
         {
             std::lock_guard<std::mutex> lk(mu_);
-            st_.current = it.rel.generic_string();
+            p_.files_total = (int)plan.items.size();
+            p_.bytes_total = plan.total_bytes;
         }
-        std::string err;
-        uint64_t before = done;
-        std::string to = (fs::path(dest_) / it.rel).string();
-        if (!copy_file_with_progress(it.from.string(), to, cancel_, done, err)) {
-            if (cancel_.load()) continue;   // reported at the top of the loop
-            fail(err);
-            return;
+        make_dirs(root_);
+        std::vector<char> buf(1 << 20);
+        int copied = 0, skipped = 0;
+        for (const PlanItem &item : plan.items) {
+            if (cancel_flag_) return finish(ImportState::Cancelled, "Cancelled. Files already copied were kept.");
+            {
+                std::lock_guard<std::mutex> lk(mu_);
+                p_.current = item.rel;
+            }
+            std::string dest = resolve_for_write(root_, item.rel);
+            if (file_size_of(dest) == item.size && fs::exists(dest)) {   // already there from an earlier run
+                ++skipped;
+                std::lock_guard<std::mutex> lk(mu_);
+                ++p_.files_done;
+                p_.bytes_done += item.size;
+                continue;
+            }
+            std::error_code ec;
+            fs::create_directories(fs::path(dest).parent_path(), ec);
+            std::string part = dest + ".part";
+            FILE *in = std::fopen(item.src.c_str(), "rb");
+            FILE *out = in ? std::fopen(part.c_str(), "wb") : nullptr;
+            if (!in || !out) {
+                if (in) std::fclose(in);
+                return finish(ImportState::Failed, "Could not " + std::string(in ? "write " : "read ") + item.rel + ".");
+            }
+            bool ok = true;
+            size_t n;
+            while (ok && (n = std::fread(buf.data(), 1, buf.size(), in)) > 0) {
+                if (std::fwrite(buf.data(), 1, n, out) != n) ok = false;
+                std::lock_guard<std::mutex> lk(mu_);
+                p_.bytes_done += n;
+                if (cancel_flag_) ok = false;
+            }
+            std::fclose(in);
+            std::fclose(out);
+            if (!ok) {
+                fs::remove(part, ec);
+                if (cancel_flag_) return finish(ImportState::Cancelled, "Cancelled. Files already copied were kept.");
+                return finish(ImportState::Failed, "Copying " + item.rel + " failed - is there enough free space?");
+            }
+            fs::remove(dest, ec);
+            fs::rename(part, dest, ec);
+            if (ec) return finish(ImportState::Failed, "Could not finish writing " + item.rel + ".");
+            ++copied;
+            std::lock_guard<std::mutex> lk(mu_);
+            ++p_.files_done;
         }
-        (void)before;
-        ++n;
-        std::lock_guard<std::mutex> lk(mu_);
-        st_.bytesDone = done;
-        st_.filesDone = n;
+        char msg[160];
+        std::snprintf(msg, sizeof msg, "Copied %d file%s%s.", copied, copied == 1 ? "" : "s",
+                      skipped ? (" (" + std::to_string(skipped) + " already present)").c_str() : "");
+        finish(ImportState::Done, msg);
     }
-    std::lock_guard<std::mutex> lk(mu_);
-    st_.state = ImportStatus::Done;
-    st_.message = "Copied " + std::to_string(n) + " files (" + human_bytes(done) + ").";
+
+    std::string root_, source_;
+    std::mutex mu_;
+    ImportProgress p_;
+    std::atomic<bool> cancel_flag_{false};
+    std::thread worker_;
+};
+
+}  // namespace
+
+std::unique_ptr<ImportService> make_folder_import_service(const std::string &data_root, const std::string &source_dir) {
+    return std::make_unique<FolderImportService>(data_root, source_dir);
 }
 
-}  // namespace launcher
+}  // namespace nl

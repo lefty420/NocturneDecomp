@@ -1,46 +1,53 @@
-// =============================================================================
-// LAUNCHER SETTINGS
-// =============================================================================
-//
-// Stored as plain key=value lines in "launcher.ini" in the app's local folder.
-// The game side reads them through the C functions at the bottom, falling back
-// to its compile-time defaults when a key has never been written.
+// The launcher's Settings screen: a small table of options, each stored either in
+// the game's own system\nocturne.ini (so the game reads it) or in launcher.cfg.
 #pragma once
 #include <string>
+#include <vector>
 
-namespace launcher {
+#include "ini_file.h"
 
-struct Settings {
-    int resolution = 2;      // index into resolutions()
-    int fit = 1;             // 0 = fill the screen, 1 = keep 4:3, 2 = whole-number scale
-    bool introMovie = true;
-    int musicVolume = 100;   // 0..100
-    int movieVolume = 100;   // 0..100
-    int lookSpeed = 5;       // 1..10 (5 = the game's default)
-    int deadzone = 20;       // percent of stick travel ignored
-    bool invertLook = false;
-    bool showFps = false;
+namespace nl {
+
+struct Choice {
+    std::string label;
+    int value;
 };
 
-struct Resolution { int w, h; };
-int resolution_count();
-Resolution resolution_at(int index);
+struct SettingDef {
+    std::string label;
+    std::string help;
+    std::string section, key;     // ini location (ignored for resolution, which uses two keys)
+    std::vector<Choice> choices;
+    bool launcher_only = false;   // stored in launcher.cfg rather than the game's ini
+    bool resolution = false;      // gamePIXX + gamePIXY
+    bool applies_next_launch = false;
+};
 
-const char *fit_name(int fit);
+class Settings {
+public:
+    explicit Settings(std::string data_root);
+    void reload();
 
-// Loads from `<root>/launcher.ini`; missing file or keys keep the defaults.
-Settings load_settings(const std::string &root);
-bool save_settings(const std::string &root, const Settings &s);
+    const std::vector<SettingDef> &defs() const { return defs_; }
+    bool game_ini_present() const { return game_ini_.loaded(); }
+    bool editable(size_t i) const { return defs_[i].launcher_only || game_ini_.loaded(); }
 
-}  // namespace launcher
+    // Index into defs()[i].choices, or -1 when the key is absent (game default) or custom.
+    int current_index(size_t i) const;
+    std::string value_label(size_t i) const;
+    // Steps the choice by +1/-1 (wrapping), writes the file. False when it could not save.
+    bool adjust(size_t i, int step);
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-// For the game's shims: the value of a launcher setting, or `fallback` when the
-// launcher has never written one. `root` is the app's data folder (with the
-// trailing slash from nocturne_data_root()).
-int nocturne_launcher_setting_int(const char *root, const char *key, int fallback);
-#ifdef __cplusplus
-}
-#endif
+    bool autostart() const;
+
+private:
+    int current_value(size_t i, bool *present) const;
+    std::string game_ini_path() const;
+    std::string launcher_cfg_path() const;
+
+    std::string root_;
+    std::vector<SettingDef> defs_;
+    IniFile game_ini_, launcher_cfg_;
+};
+
+}  // namespace nl

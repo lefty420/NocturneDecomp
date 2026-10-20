@@ -1,92 +1,115 @@
 #include "settings.h"
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <fstream>
-#include <map>
-#include <sstream>
+#include "fs_util.h"
 
-namespace launcher {
+namespace nl {
 
-// Same ordered list as the game's own resolution selector (shims/gl/resolution.cpp).
-static const Resolution kRes[] = {{320, 240}, {512, 384}, {640, 480}, {800, 600}, {1024, 768}, {1280, 1024}};
+namespace {
+std::vector<Choice> onoff() { return {{"Off", 0}, {"On", 1}}; }
+}  // namespace
 
-int resolution_count() { return (int)(sizeof kRes / sizeof kRes[0]); }
-Resolution resolution_at(int i) {
-    if (i < 0) i = 0;
-    if (i >= resolution_count()) i = resolution_count() - 1;
-    return kRes[i];
+Settings::Settings(std::string data_root) : root_(std::move(data_root)) {
+    SettingDef res;
+    res.label = "Resolution";
+    res.help = "Game render resolution. Higher modes need the 3D renderer and cost more memory and speed.";
+    res.resolution = true;
+    res.applies_next_launch = true;
+    for (auto wh : {std::pair<int, int>{320, 240}, {512, 384}, {640, 480}, {800, 600}, {1024, 768}, {1280, 1024}})
+        res.choices.push_back({std::to_string(wh.first) + " x " + std::to_string(wh.second), wh.first * 10000 + wh.second});
+    defs_.push_back(res);
+
+    defs_.push_back({"Shadows", "Draw shadows under characters.", "Graphics", "shadowFlag", onoff(), false, false, true});
+    defs_.push_back({"Blood", "Show blood in combat.", "Graphics", "bloodFlag", onoff(), false, false, true});
+    defs_.push_back({"Strong language", "Allow strong language in dialogue.", "Graphics", "foulLanguageFlag", onoff(), false, false, true});
+    defs_.push_back({"Always run", "Run by default instead of walking.", "Control", "alwaysRun", onoff(), false, false, true});
+    defs_.push_back({"Auto-use health", "Use a health item automatically when health runs low.", "Control", "autoUseHealth", onoff(), false, false, true});
+
+    SettingDef mv;
+    mv.label = "Movie volume";
+    mv.help = "Volume of cut-scene movies, as a percentage.";
+    mv.section = "Sound";
+    mv.key = "MovieVolume";
+    for (int v = 0; v <= 100; v += 10) mv.choices.push_back({std::to_string(v) + "%", v});
+    defs_.push_back(mv);
+
+    defs_.push_back({"Menu font", "Size of the font used by the pause menu and pick lists.", "Graphics", "menuFont",
+                     {{"Large", 0}, {"Small", 1}}, false, false, true});
+
+    SettingDef as;
+    as.label = "Start game automatically";
+    as.help = "Skip this launcher and start the game as soon as its files are found. Hold B while the countdown runs to stay here.";
+    as.section = "Launcher";
+    as.key = "autoStart";
+    as.choices = onoff();
+    as.launcher_only = true;
+    defs_.push_back(as);
+
+    reload();
 }
 
-const char *fit_name(int fit) {
-    switch (fit) {
-        case 0: return "Fill screen";
-        case 2: return "Whole-number scale";
-        default: return "Keep 4:3";
+std::string Settings::game_ini_path() const { return find_ci(root_, "system\\nocturne.ini"); }
+std::string Settings::launcher_cfg_path() const { return resolve_for_write(root_, "launcher.cfg"); }
+
+void Settings::reload() {
+    std::string p = game_ini_path();
+    if (p.empty()) game_ini_ = IniFile();
+    else game_ini_.load(p);
+    launcher_cfg_.load(launcher_cfg_path());
+}
+
+int Settings::current_value(size_t i, bool *present) const {
+    const SettingDef &d = defs_[i];
+    if (d.resolution) {
+        bool ok = game_ini_.has("Graphics", "gamePIXX") && game_ini_.has("Graphics", "gamePIXY");
+        if (present) *present = ok;
+        return game_ini_.get_int("Graphics", "gamePIXX", 640) * 10000 + game_ini_.get_int("Graphics", "gamePIXY", 480);
     }
+    const IniFile &f = d.launcher_only ? launcher_cfg_ : game_ini_;
+    if (present) *present = f.has(d.section, d.key);
+    return f.get_int(d.section, d.key, 0);
 }
 
-static std::string path_of(const std::string &root) {
-    std::string r = root;
-    if (!r.empty() && r.back() != '/' && r.back() != '\\') r += '/';
-    return r + "launcher.ini";
+int Settings::current_index(size_t i) const {
+    bool present = false;
+    int v = current_value(i, &present);
+    if (!present) return defs_[i].launcher_only ? 0 : -1;   // launcher options start at their first choice (Off)
+    const auto &ch = defs_[i].choices;
+    for (size_t k = 0; k < ch.size(); ++k)
+        if (ch[k].value == v) return (int)k;
+    return -1;
 }
 
-static std::map<std::string, std::string> read_kv(const std::string &root) {
-    std::map<std::string, std::string> kv;
-    std::ifstream in(path_of(root));
-    std::string line;
-    while (std::getline(in, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        size_t eq = line.find('=');
-        if (eq == std::string::npos || line[0] == ';' || line[0] == '#') continue;
-        kv[line.substr(0, eq)] = line.substr(eq + 1);
+std::string Settings::value_label(size_t i) const {
+    int idx = current_index(i);
+    if (idx >= 0) return defs_[i].choices[(size_t)idx].label;
+    bool present = false;
+    int v = current_value(i, &present);
+    if (!present) return defs_[i].launcher_only ? "Off" : "Game default";
+    if (defs_[i].resolution) return std::to_string(v / 10000) + " x " + std::to_string(v % 10000);
+    return std::to_string(v);
+}
+
+bool Settings::adjust(size_t i, int step) {
+    if (!editable(i)) return false;
+    const SettingDef &d = defs_[i];
+    int n = (int)d.choices.size();
+    int idx = current_index(i);
+    if (idx < 0) idx = step > 0 ? -1 : 0;
+    idx = ((idx + step) % n + n) % n;
+    int v = d.choices[(size_t)idx].value;
+    if (d.resolution) {
+        game_ini_.set_int("Graphics", "gamePIXX", v / 10000);
+        game_ini_.set_int("Graphics", "gamePIXY", v % 10000);
+        return game_ini_.save(game_ini_path());
     }
-    return kv;
+    if (d.launcher_only) {
+        launcher_cfg_.set_int(d.section, d.key, v);
+        return launcher_cfg_.save(launcher_cfg_path());
+    }
+    game_ini_.set_int(d.section, d.key, v);
+    return game_ini_.save(game_ini_path());
 }
 
-static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+bool Settings::autostart() const { return launcher_cfg_.get_int("Launcher", "autoStart", 0) != 0; }
 
-Settings load_settings(const std::string &root) {
-    Settings s;
-    auto kv = read_kv(root);
-    auto geti = [&](const char *k, int d) {
-        auto it = kv.find(k);
-        return it == kv.end() ? d : std::atoi(it->second.c_str());
-    };
-    s.resolution = clampi(geti("resolution", s.resolution), 0, resolution_count() - 1);
-    s.fit = clampi(geti("fit", s.fit), 0, 2);
-    s.introMovie = geti("introMovie", s.introMovie) != 0;
-    s.musicVolume = clampi(geti("musicVolume", s.musicVolume), 0, 100);
-    s.movieVolume = clampi(geti("movieVolume", s.movieVolume), 0, 100);
-    s.lookSpeed = clampi(geti("lookSpeed", s.lookSpeed), 1, 10);
-    s.deadzone = clampi(geti("deadzone", s.deadzone), 0, 40);
-    s.invertLook = geti("invertLook", s.invertLook) != 0;
-    s.showFps = geti("showFps", s.showFps) != 0;
-    return s;
-}
-
-bool save_settings(const std::string &root, const Settings &s) {
-    std::ofstream out(path_of(root), std::ios::trunc);
-    if (!out) return false;
-    out << "; written by the launcher\n"
-        << "resolution=" << s.resolution << "\n"
-        << "fit=" << s.fit << "\n"
-        << "introMovie=" << (s.introMovie ? 1 : 0) << "\n"
-        << "musicVolume=" << s.musicVolume << "\n"
-        << "movieVolume=" << s.movieVolume << "\n"
-        << "lookSpeed=" << s.lookSpeed << "\n"
-        << "deadzone=" << s.deadzone << "\n"
-        << "invertLook=" << (s.invertLook ? 1 : 0) << "\n"
-        << "showFps=" << (s.showFps ? 1 : 0) << "\n";
-    return (bool)out;
-}
-
-}  // namespace launcher
-
-extern "C" int nocturne_launcher_setting_int(const char *root, const char *key, int fallback) {
-    auto kv = launcher::read_kv(root ? root : "");
-    auto it = kv.find(key ? key : "");
-    return it == kv.end() ? fallback : std::atoi(it->second.c_str());
-}
+}  // namespace nl
