@@ -1,0 +1,117 @@
+name: uwp-app
+
+# Compiles the whole game (every decompiled source plus the shims) for UWP with clang-cl and links it
+# against the UWP builds of SDL2, SDL2_ttf, FreeType and FFmpeg (from the other workflows' artifacts).
+# Long (about an hour on a cold cache). Objects are cached, so reruns only rebuild what changed.
+# See docs/xbox-uwp.md.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Compile only the first N files (0 = all). For debugging the workflow.'
+        default: '0'
+  push:
+    branches: [xbox-uwp-gles-groundwork]
+    paths:
+      - '.github/workflows/uwp-app.yml'
+      - '.github/scripts/uwp_build.py'
+      - 'annotations/nocedit.exe/pseudocode/shims/**'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 340
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          uwp: true
+
+      - name: Fetch the UWP libraries built by the other workflows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $log = New-Object System.Collections.Generic.List[string]
+          function Get-Art($workflow, $name, $dest) {
+            $id = gh run list --repo $env:GITHUB_REPOSITORY --workflow $workflow --branch xbox-uwp-gles-groundwork --status success --limit 1 --json databaseId --jq '.[0].databaseId'
+            gh run download $id --repo $env:GITHUB_REPOSITORY -n $name -D $dest 2>&1 | Out-Null
+            $n = (Get-ChildItem $dest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
+            $log.Add("$name from $workflow run ${id}: $n files")
+          }
+          Get-Art 'xbox-uwp.yml' 'sdl2-uwp-x64' 'libs\sdl'
+          Get-Art 'libs-uwp.yml' 'sdl2-ttf-uwp-x64' 'libs\ttf'
+          Get-Art 'libs-uwp.yml' 'ffmpeg-uwp-x64' 'libs\ffmpeg'
+          Get-Art 'angle-uwp.yml' 'angle-uwp-x64' 'libs\angle'
+          Get-ChildItem libs -Recurse -File -Include *.lib,*.a,*.dll | ForEach-Object { $log.Add("  " + $_.FullName.Replace($PWD.Path + '\', '') + " " + $_.Length) }
+          $log | Out-File libs.txt
+          python .github\scripts\annotate_log.py --title "UWP libraries" --file libs.txt --tail 30
+
+      - name: Fetch SDL2 and SDL_ttf headers
+        shell: pwsh
+        run: |
+          $d = Join-Path $env:RUNNER_TEMP 'deps'
+          New-Item -ItemType Directory -Force $d | Out-Null
+          git clone -q --depth 1 -b release-2.30.0 https://github.com/libsdl-org/SDL "$d\sdl"
+          git clone -q --depth 1 -b release-2.22.0 https://github.com/libsdl-org/SDL_ttf "$d\ttf"
+          New-Item -ItemType Directory -Force "$d\inc" | Out-Null
+          Copy-Item "$d\sdl\include" "$d\inc\SDL2" -Recurse
+
+      - name: Collect sources and stamp the version
+        shell: pwsh
+        run: |
+          $R = "$PWD\annotations\nocedit.exe\pseudocode"
+          New-Item -ItemType Directory -Force out\gen | Out-Null
+          python cmake\collect_sources.py --src-root "$R\src" --module "$R\main" --module "$R\checks" `
+            --out-dir out\gen --skip-list cmake\skip_list.txt --modules-file out\gen\modules.txt `
+            --exclude-module entry --exclude-module crt | Out-Null
+          cmake "-DVERSION=0.1.3" "-DSOURCE_DIR=$PWD" "-DOUT=$PWD\out\gen\nocturne_version.h" "-DTEMPLATE=$PWD\cmake\nocturne_version.h.in" "-DBUILD_TAG=uwp-x64" -P cmake\write_version.cmake
+          "sources: " + ((Get-ChildItem out\gen\sources_*.txt | ForEach-Object { (Get-Content $_).Count } | Measure-Object -Sum).Sum) | Out-File gen.txt
+          Test-Path out\gen\nocturne_version.h | Out-File gen.txt -Append
+          python .github\scripts\annotate_log.py --title "Source collection" --file gen.txt --tail 4
+
+      - name: Restore cached objects
+        uses: actions/cache/restore@v4
+        with:
+          path: objcache
+          key: uwp-objs-${{ github.run_id }}
+          restore-keys: uwp-objs-
+
+      - name: Compile everything and link
+        shell: pwsh
+        run: |
+          $d = Join-Path $env:RUNNER_TEMP 'deps'
+          $R = "$PWD\annotations\nocedit.exe\pseudocode"
+          $angleInc = (Get-ChildItem libs\angle -Recurse -Directory -Filter GLES3 | Select-Object -First 1).Parent.FullName
+          $ffInc = (Get-ChildItem libs\ffmpeg -Recurse -Directory -Filter libavformat | Select-Object -First 1).Parent.FullName
+          $lib = { param($pat) (Get-ChildItem libs -Recurse -File -Filter $pat | Select-Object -First 1).FullName }
+          $libs = @((& $lib 'SDL2.lib'), (& $lib 'SDL2_ttf.lib'), (& $lib 'freetype.lib'),
+                    (& $lib 'libavformat.a'), (& $lib 'libavcodec.a'), (& $lib 'libswscale.a'), (& $lib 'libswresample.a'), (& $lib 'libavutil.a'),
+                    'WindowsApp.lib', 'bcrypt.lib', 'ws2_32.lib')
+          $libArgs = @(); foreach ($l in $libs) { $libArgs += @('--lib', $l) }
+          $limit = '${{ github.event.inputs.limit }}'; if (-not $limit) { $limit = '0' }
+          python .github\scripts\uwp_build.py --pseudocode $R --sources-dir out\gen --gen-dir out\gen `
+            --include "$d\sdl\include" --include "$d\inc" --include "$d\ttf" --include $angleInc --include $ffInc `
+            @libArgs --obj-dir objcache --out out\app --jobs 4 --limit $limit
+          exit 0
+
+      - name: Save cached objects
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: objcache
+          key: uwp-objs-${{ github.run_id }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uwp-app-logs
+          path: |
+            out/app/*.log
+            out/app/*.txt
