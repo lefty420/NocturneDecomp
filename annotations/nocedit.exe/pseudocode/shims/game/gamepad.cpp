@@ -5,6 +5,7 @@
 // See gamepad.h for what this is, where the input codes live and why almost
 // none of the engine has to know about it.
 
+#include "core/launcher_settings.h"
 #include "game/gamepad.h"
 #include "game/automap.h"
 #include "shim_config.h"
@@ -101,7 +102,7 @@ bool trigger_down(int code, float pull) {
 // Radial deadzone with the live range rescaled to 0..1, so a stick starts
 // moving the hero from a standstill rather than from the deadzone edge.
 void deadzone(float raw_x, float raw_y, float *out_x, float *out_y) {
-    const float dz = NOCTURNE_PAD_STICK_DEADZONE;
+    const float dz = nocturne_launcher_settings()->stick_deadzone;
     float magnitude = SDL_sqrtf(raw_x * raw_x + raw_y * raw_y);
 
     if (magnitude <= dz) {
@@ -691,11 +692,11 @@ extern "C" int nocturne_gamepad_apply_analog(CGame *game, SPlayerInput *input) {
         input->strafe_speed = move_x;
     }
     if (look_x != 0.0f) {
-        input->turn_speed = look_x * NOCTURNE_PAD_TURN_RATE * x_sensitivity;
+        input->turn_speed = look_x * nocturne_launcher_settings()->turn_rate * x_sensitivity;
     }
     if (look_y != 0.0f) {
-        const float look = NOCTURNE_PAD_INVERT_LOOK ? -look_y : look_y;
-        input->look_up_down_speed = look * NOCTURNE_PAD_LOOK_RATE * y_sensitivity;
+        const float look = nocturne_launcher_settings()->invert_look ? -look_y : look_y;
+        input->look_up_down_speed = look * nocturne_launcher_settings()->look_rate * y_sensitivity;
     }
 
     // Speed. SPlayerActionState has no continuous forward speed — the

@@ -1,0 +1,87 @@
+name: launcher
+
+# The launcher app (packaging/uwp/launcher): Play / Game files / Settings / About, driven by a
+# gamepad. One job runs it for real on Linux against temporary folders and saves screenshots;
+# the other compiles it for UWP, including the C++/CX Xbox import providers.
+on:
+  workflow_dispatch:
+  push:
+    branches: [xbox-uwp-gles-groundwork]
+    paths:
+      - 'packaging/uwp/launcher/**'
+      - 'annotations/nocedit.exe/pseudocode/shims/core/launcher_settings.*'
+      - 'annotations/nocedit.exe/pseudocode/tests/shims/core/test_launcher_settings.cpp'
+      - '.github/workflows/launcher.yml'
+
+jobs:
+  launcher-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2 and Pillow
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libsdl2-dev clang python3-pil
+      - name: Settings parser unit tests
+        run: |
+          R=annotations/nocedit.exe/pseudocode
+          cd $R
+          clang++ -std=c++17 -Itests -Ishims -Iinclude -I. tests/shims/core/test_launcher_settings.cpp \
+            shims/core/launcher_settings.cpp shims/core/data_root.cpp -o /tmp/ls_test
+          /tmp/ls_test 2>&1 | tail -3
+      - name: Build and run the launcher harness (software renderer, no display)
+        run: |
+          R=$PWD/annotations/nocedit.exe/pseudocode/shims
+          L=packaging/uwp/launcher
+          clang++ -std=c++17 -O1 -Wall $(sdl2-config --cflags) -I$R $L/tests/harness.cpp $L/src/gfx.cpp $L/src/app.cpp \
+            $L/src/game_files.cpp $L/src/imports.cpp $L/src/imports_platform_default.cpp $L/src/settings_store.cpp \
+            $R/core/launcher_settings.cpp $R/core/data_root.cpp $(sdl2-config --libs) -lpthread -o harness
+          SDL_VIDEODRIVER=dummy ./harness $L/assets/fonts shots | tee harness.txt
+          python3 -c "
+          from PIL import Image
+          import glob
+          for f in sorted(glob.glob('shots/*.bmp')): Image.open(f).convert('RGB').save(f[:-4]+'.png')
+          "
+          rm -f shots/*.bmp
+          python3 .github/scripts/annotate_log.py --title "Launcher harness" --file harness.txt --tail 6
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: launcher-screenshots
+          path: shots/
+
+  launcher-uwp-compile:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          uwp: true
+      - name: Fetch SDL2 headers
+        shell: pwsh
+        run: git clone -q --depth 1 -b SDL2 https://github.com/libsdl-org/SDL "$env:RUNNER_TEMP\sdl"
+      - name: Compile for UWP (plain C++ files, then the C++/CX providers)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $R = "$PWD\annotations\nocedit.exe\pseudocode\shims"
+          $L = "$PWD\packaging\uwp\launcher"
+          $sdl = "$env:RUNNER_TEMP\sdl\include"
+          $common = @('/nologo','/c','/std:c++17','/EHsc','/utf-8','/DWINAPI_FAMILY=WINAPI_FAMILY_APP','/D_WIN32_WINNT=0x0A00',"/I$R","/I$sdl",'/Fo:NUL')
+          $plain = @("$L\src\gfx.cpp","$L\src\app.cpp","$L\src\game_files.cpp","$L\src\imports.cpp","$L\src\imports_platform_default.cpp",
+                     "$L\src\settings_store.cpp","$L\src\launcher_main.cpp","$R\core\launcher_settings.cpp","$R\core\data_root.cpp","$R\game\gamepad.cpp")
+          $rows = @()
+          foreach ($f in $plain) {
+            $out = & cl @common $f 2>&1 | Out-String
+            $errs = @($out -split "`r?`n" | Where-Object { $_ -match ': (fatal )?error C' })
+            $rows += "$(Split-Path $f -Leaf): $($errs.Count) errors"
+            $errs | Select-Object -First 4 | ForEach-Object { $rows += "    " + ($_ -replace '^.*?\\(pseudocode|launcher)\\','') }
+          }
+          $out = & cl @common /ZW "$L\src\imports_platform_uwp.cpp" 2>&1 | Out-String
+          $errs = @($out -split "`r?`n" | Where-Object { $_ -match ': (fatal )?error C' })
+          $rows += "imports_platform_uwp.cpp (/ZW): $($errs.Count) errors"
+          $errs | Select-Object -First 8 | ForEach-Object { $rows += "    " + ($_ -replace '^.*?\\launcher\\','') }
+          $rows | Out-File compile.txt
+          python .github\scripts\annotate_log.py --title "Launcher UWP compile" --file compile.txt --tail 40
+          exit 0

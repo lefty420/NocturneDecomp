@@ -1,61 +1,83 @@
+// Small 2D drawing layer for the launcher: text (stb_truetype), rounded boxes,
+// gradients and procedurally drawn icons, all on top of SDL_Renderer so it runs
+// unchanged on desktop and on UWP (where SDL_Renderer is Direct3D 11).
 #pragma once
-// Small 2D toolkit on top of SDL_Renderer: anti-aliased rounded boxes, soft shadows,
-// gradients and TrueType text (stb_truetype, embedded Poppins). No other dependencies,
-// so it behaves the same on Linux (for testing) and on UWP/Xbox (SDL's D3D11 renderer).
 #include <SDL.h>
-#include <string>
-#include <unordered_map>
 
-namespace launcher {
+#include <cstdint>
+#include <map>
+#include <string>
+#include <vector>
+
+namespace nl {
 
 struct Color {
-    Uint8 r, g, b, a;
-    constexpr Color(Uint8 r_ = 0, Uint8 g_ = 0, Uint8 b_ = 0, Uint8 a_ = 255) : r(r_), g(g_), b(b_), a(a_) {}
-    Color alpha(Uint8 na) const { return Color(r, g, b, na); }
-    Color scaled(float k) const;  // multiply alpha
+    uint8_t r, g, b, a;
 };
-Color mix(Color a, Color b, float t);
+constexpr Color rgb(int r, int g, int b, int a = 255) {
+    return Color{(uint8_t)r, (uint8_t)g, (uint8_t)b, (uint8_t)a};
+}
+inline Color with_alpha(Color c, int a) { return Color{c.r, c.g, c.b, (uint8_t)a}; }
 
-enum class Align { Left, Center, Right };
-enum class Weight { Regular, Medium };
+enum class Weight { Regular = 0, Medium = 1, Bold = 2 };
 
-struct FontFace;  // opaque
+enum class Icon { Check, Cross, Play, Folder, Sliders, Info, ChevLeft, ChevRight, Drive, Refresh, Warning, Gamepad };
 
 class Gfx {
 public:
-    Gfx() = default;
-    ~Gfx();
-    bool init(SDL_Renderer *renderer);
+    ~Gfx() { shutdown(); }
 
-    // Filled / outlined rounded boxes (anti-aliased via pre-rendered nine-slice textures).
-    void box(float x, float y, float w, float h, Color c, float radius = 14);
-    void ring(float x, float y, float w, float h, Color c, float radius = 14);
-    void shadow(float x, float y, float w, float h, Color c, float radius = 14, float spread = 28);
-    void rect(float x, float y, float w, float h, Color c);
-    void gradientV(float x, float y, float w, float h, Color top, Color bottom);
-    void vignette(float w, float h, Uint8 strength);
+    // Loads Poppins-{Regular,Medium,Bold}.ttf from `font_dir`. False if one is missing.
+    bool init(SDL_Renderer *renderer, const std::string &font_dir);
+    void shutdown();
 
-    // Text. y is the top of the line box. Returns the drawn width.
-    float text(const std::string &s, float x, float y, int px, Color c, Align a = Align::Left,
-               Weight wgt = Weight::Regular);
-    float measure(const std::string &s, int px, Weight wgt = Weight::Regular);
-    int lineHeight(int px) const { return px * 3 / 2; }
-    // Word-wraps into max_w; returns the number of lines drawn. maxLines<=0 means unlimited.
-    int paragraph(const std::string &s, float x, float y, float max_w, int px, Color c,
-                  Weight wgt = Weight::Regular, int maxLines = 0);
+    // Physical pixels per logical pixel (output height / logical height). Text and
+    // icons are rasterised at physical size so they stay sharp at 4K.
+    void set_scale(float physical_per_logical);
+    float scale() const { return scale_; }
 
-    SDL_Renderer *renderer() { return r_; }
+    // Text. `y` is the top of the line box; sizes are logical pixels.
+    int text_width(const std::string &s, int px, Weight w, int spacing = 0);
+    int line_height(int px, Weight w);
+    void text(const std::string &s, int x, int y, int px, Weight w, Color c, int spacing = 0);
+    void text_right(const std::string &s, int right, int y, int px, Weight w, Color c, int spacing = 0);
+    void text_center(const std::string &s, int cx, int y, int px, Weight w, Color c, int spacing = 0);
+    std::vector<std::string> wrap(const std::string &s, int px, Weight w, int max_w);
+
+    // Shapes (logical pixels).
+    void rect(int x, int y, int w, int h, Color c);
+    void round_rect(int x, int y, int w, int h, int r, Color c);
+    void circle(int cx, int cy, int r, Color c);
+    void gradient_v(int x, int y, int w, int h, Color top, Color bottom);
+    void glow(int cx, int cy, int radius, Color c);
+    void crescent(int cx, int cy, int r, Color c);
+    void icon(Icon i, int x, int y, int size, Color c);
+
+    SDL_Renderer *renderer() const { return r_; }
 
 private:
-    struct Glyph { SDL_Texture *tex = nullptr; int w = 0, h = 0, xoff = 0, yoff = 0; float adv = 0; };
-    const Glyph &glyph(Weight w, int px, unsigned cp);
-    SDL_Texture *makeNineSlice(int kind);
-    void slice(SDL_Texture *t, int srcSize, int srcCorner, float x, float y, float w, float h, float corner, Color c);
+    struct Atlas {
+        SDL_Texture *tex = nullptr;
+        int w = 0, h = 0;
+        float ascent = 0, descent = 0, line_gap = 0;
+        std::vector<unsigned char> baked;   // stbtt_bakedchar[96]
+    };
+    struct FontData;
+    Atlas *atlas(Weight w, int px_physical);
+    SDL_Texture *corner_texture(int r_physical);
+    SDL_Texture *soft_circle_texture();
+    SDL_Texture *crescent_texture();
+    SDL_Texture *icon_texture(Icon i);
+    void free_caches();
 
     SDL_Renderer *r_ = nullptr;
-    SDL_Texture *fill_ = nullptr, *ring_ = nullptr, *shadow_ = nullptr, *vign_ = nullptr;
-    FontFace *faces_[2] = {nullptr, nullptr};
-    std::unordered_map<unsigned long long, Glyph> glyphs_;
+    float scale_ = 1.0f;
+    std::vector<FontData *> fonts_;
+    std::map<int, Atlas *> atlases_;   // key: weight * 100000 + px
+    std::map<int, SDL_Texture *> corners_;
+    std::map<int, SDL_Texture *> icons_;
+    SDL_Texture *soft_ = nullptr;
+    SDL_Texture *crescent_ = nullptr;
 };
 
-}  // namespace launcher
+}  // namespace nl

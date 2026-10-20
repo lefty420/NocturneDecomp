@@ -4,4 +4,5 @@ nocturne_test_suite(shims_core
         # the test builds itself.
         shims/core/data_root.cpp
         shims/core/file_search.cpp
+        shims/core/launcher_settings.cpp
 )
