@@ -5,9 +5,9 @@
 #include "core/dfont/dfont.h"
 #include "core/game/game.h"
 #include "core/inivar/inivar.h"
+#include "core/level/levelloader.h"
 #include "core/main/main.h"
 #include "core/menu/menu.h"
-#include "core/menuinput.h"
 #include "core/mission/demonmission.h"
 #include "core/netgame/netgame.h"
 #include "core/set/demonset.h"
@@ -22,6 +22,7 @@
 #include "engine/keys/keys.h"
 #include "engine/light/light.h"
 #include "engine/matrix/matrix.h"
+#include "engine/menuinput.h"
 #include "engine/ncursfx/mouse.h"
 #include "engine/pod/pod.h"
 #include "engine/prim/prim.h"
@@ -30,7 +31,9 @@
 #include "engine/texture/texture.h"
 #include "engine/zraster/zraster.h"
 #include "platform/rendervertex.h"
+#include "shape/edittool/edcontrols.h"
 #include "shape/edittool/editortools.h"
+#include "shape/edittool/picklist.h"
 #include "support/newmsg/newmsg.h"
 #include "tests/mocks/engine/fontsheet.h"
 #include "tests/mocks/engine/memoryscreen.h"
@@ -182,7 +185,6 @@ protected:
                                .special = special_,
                                .current_texture = current_texture_}};
     CSound game_sound_{sound_, pod_, file_system_};
-    CDemonMission mission_;
     std::array<CDemonFilter, 8> global_filters_;
     std::array<CDemonFilter, 4> player_filters_;
     engine::CMouse mouse_{dosio_, screen_, special_};
@@ -196,7 +198,7 @@ protected:
     CDemonSet set_{demon_renderer_, matrix_, special_};
     common::CWatcomRandom crt_random_;
     CActor actor_{game_, crt_random_};
-    CMenuInput menu_input_{keys_};
+    engine::CMenuInput menu_input_{keys_};
     CMenu menu_{{.dosio = dosio_,
                  .screen = screen_,
                  .special = special_,
@@ -212,6 +214,32 @@ protected:
                  .actor = actor_,
                  .crt_random = crt_random_,
                  .build_version = "0.1.0"}};
+    shape::CEdControls controls_{{.two_d = two_d_,
+                                  .screen = screen_,
+                                  .raw_input = raw_input_,
+                                  .clock = game_clock_,
+                                  .editor_tools = editor_tools_}};
+    shape::SPickListOwners pick_list_owners_{.controls = controls_,
+                                             .keys = keys_,
+                                             .menu_input = menu_input_,
+                                             .three_d = three_d_,
+                                             .screen = screen_};
+    CLevelLoader level_loader_{{.dosio = dosio_,
+                                .screen = screen_,
+                                .special = special_,
+                                .two_d = two_d_,
+                                .matrix = matrix_,
+                                .renderer = demon_renderer_,
+                                .set = set_,
+                                .fonts = fonts_,
+                                .crt_random = crt_random_}};
+    CDemonMission mission_{{.dosio = dosio_,
+                            .messages = messages_,
+                            .actor = actor_,
+                            .level_loader = level_loader_,
+                            .textures = texture_,
+                            .editor_tools = editor_tools_,
+                            .pick_list = pick_list_owners_}};
     std::vector<std::string> movies_;
     SGameSystemOwners owners_{.ini = ini_,
                               .file_system = file_system_,

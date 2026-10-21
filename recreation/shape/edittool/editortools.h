@@ -60,8 +60,14 @@ public:
     // A box titled "Error" holding the message, until a key is pressed.
     void showError(std::string_view message);
     void displayCenteredStatusMessage(char *format, ...);
-    int showFileSelectionDialog(char *dialog_title, char *search_directory, char *file_pattern,
-                                char *output_filename, std::uint32_t flags);
+    // A pick list of the files matching search_directory\file_pattern, on the file named
+    // output_filename when start_on_current is set, which writes the picked file's name there.
+    // False when cancelled, or after an error box when nothing matches.
+    [[nodiscard]] bool showFileSelectionDialog(const SFileSelectionOwners &owners,
+                                               std::string_view dialog_title,
+                                               std::string_view search_directory,
+                                               std::string_view file_pattern,
+                                               std::string &output_filename, bool start_on_current);
     int showFilenameInputDialog(char *dialog_title, char *directory_path, char *file_extension,
                                 char *output_buffer, std::uint32_t flags);
     int promptForValidInteger(char *prompt_text, int *result_ptr, int enable_range_check,
@@ -111,6 +117,8 @@ public:
     [[nodiscard]] std::size_t getWindowCount() const;
     // Measures the editor font's widest glyph and line, which the dialogs space by.
     void initEditorFontMetrics();
+    // The height of a 'j' at the HUD scale, as last measured.
+    [[nodiscard]] int getEditorFontLineHeight() const;
     // The HUD scale everything here is measured and drawn at.
     [[nodiscard]] int getScale() const;
     // The editor font; fatal when the application hasn't set one.
