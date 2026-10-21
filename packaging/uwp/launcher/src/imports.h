@@ -18,6 +18,10 @@ struct ImportProvider {
     std::string subtitle;   // one line under it
     // Empty when the provider can run; otherwise a short reason to show the player.
     std::function<std::string()> unavailable_reason;
+    // Optional. Runs on a worker thread at start-up when the game files are missing; returns a short
+    // description of where files were found ("drive E:") or an empty string. When it finds something
+    // the launcher starts this provider's import by itself.
+    std::function<std::string()> probe;
     // Runs on a worker thread; reports through `progress`.
     std::function<CopyOutcome(CopyProgress &progress, const std::filesystem::path &data_root)> run;
 };

@@ -65,6 +65,7 @@ App::~App() {
         if (job_->thread.joinable()) job_->thread.join();
     }
     if (scan_.valid()) scan_.wait();
+    if (probe_.valid()) probe_.wait();
 }
 
 void App::start_scan() {
@@ -77,6 +78,29 @@ void App::finish_scan_if_ready() {
     if (scan_.valid() && scan_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
         scan_result_ = scan_.get();
         scanned_once_ = true;
+    }
+    // First time the files turn out to be missing: ask the providers that can look by themselves.
+    if (scanned_once_ && !scan_result_.ready && !auto_probed_ && !job_ && modal_ == Modal::None) {
+        auto_probed_ = true;
+        std::vector<std::pair<size_t, std::function<std::string()>>> probes;
+        for (size_t i = 0; i < providers_.size(); i++)
+            if (providers_[i].probe) probes.emplace_back(i, providers_[i].probe);
+        if (!probes.empty())
+            probe_ = std::async(std::launch::async, [probes] {
+                for (auto &pr : probes) {
+                    std::string where = pr.second();
+                    if (!where.empty()) return std::make_pair(pr.first, where);
+                }
+                return std::make_pair(static_cast<size_t>(0), std::string());
+            });
+    }
+    if (probe_.valid() && probe_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+        auto found = probe_.get();
+        if (!found.second.empty() && !job_ && modal_ == Modal::None) {
+            toast_text_ = "Found game files on " + found.second;
+            toast_ = 2.5f;
+            start_import(found.first);
+        }
     }
 }
 

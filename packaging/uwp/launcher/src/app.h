@@ -9,10 +9,12 @@
 #include "core/launcher_settings.h"
 
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace nl {
@@ -107,6 +109,8 @@ private:
     std::future<ScanResult> scan_;
     ScanResult scan_result_;
     bool scanned_once_ = false;
+    bool auto_probed_ = false;                 // the start-up drive check has been started
+    std::future<std::pair<size_t, std::string>> probe_;  // provider index and where it found files
 
     std::unique_ptr<Job> job_;
     Ease tab_x_, tab_w_, focus_y_;

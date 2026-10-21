@@ -182,8 +182,8 @@ StorageFolder ^pick_folder(std::string &error) {
 void add_platform_providers(std::vector<ImportProvider> &out) {
     {
         ImportProvider p;
-        p.title = "Pick a folder with the file picker";
-        p.subtitle = "Opens the system folder picker (may be restricted on Xbox)";
+        p.title = "Choose a folder myself";
+        p.subtitle = "Point to any folder holding your game files (the console may restrict this)";
         p.unavailable_reason = [] { return std::string(); };
         p.run = [](CopyProgress &progress, const std::filesystem::path &) -> CopyOutcome {
             RoInitialize(RO_INIT_MULTITHREADED);
@@ -216,8 +216,21 @@ void add_platform_providers(std::vector<ImportProvider> &out) {
     {
         ImportProvider p;
         p.title = "Import from a USB drive";
-        p.subtitle = "Looks for a Nocturne folder on an attached drive";
+        p.subtitle = "Finds a Nocturne folder on an attached drive; also runs by itself at start-up";
         p.unavailable_reason = [] { return std::string(); };
+        p.probe = []() -> std::string {
+            RoInitialize(RO_INIT_MULTITHREADED);
+            try {
+                for (StorageFolder ^drive : await(KnownFolders::RemovableDevices->GetFoldersAsync())) {
+                    if (find_root(drive) != nullptr) {
+                        std::wstring w = drive->Name->Data();
+                        return "drive " + std::string(w.begin(), w.end());
+                    }
+                }
+            } catch (Platform::Exception ^) {
+            }
+            return std::string();
+        };
         p.run = [](CopyProgress &progress, const std::filesystem::path &) -> CopyOutcome {
             RoInitialize(RO_INIT_MULTITHREADED);
             try {
