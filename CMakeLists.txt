@@ -531,7 +531,9 @@ if(NOCTURNE_BUILD_EXE)
     if(NOCTURNE_UWP)
         # Everything a UWP app may call comes through WindowsApp.lib (the toolchain file
         # links it); ws2_32, winmm and version are desktop import libraries.
-        target_link_libraries(nocturne PRIVATE ${NOCTURNE_UWP_EXTRA_OBJECTS})
+        # ws2_32 (sockets) and bcrypt (FFmpeg's random seed) are permitted to UWP apps but are
+        # not part of the umbrella library.
+        target_link_libraries(nocturne PRIVATE ${NOCTURNE_UWP_EXTRA_OBJECTS} ws2_32 bcrypt)
     elseif(WIN32)
         # ws2_32 backs winsock_win32.c. The rest are what the kernel32 shim
         # reaches for once its POSIX arms give way to the Win32 ones: winmm for
