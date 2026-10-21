@@ -135,6 +135,15 @@ jobs:
           Copy-Item packaging\uwp\launcher\assets\fonts\*.ttf "$P\fonts"
           python -m pip install -q pillow 2>&1 | Out-Null
           python .github\scripts\make_logos.py "$P\Assets"
+          # What the exe and each bundled DLL import: anything that is not a Windows/UWP system DLL or
+          # shipped in the package makes the app die silently at launch.
+          $dep = @()
+          foreach ($bin in (Get-ChildItem $P -Filter *.exe), (Get-ChildItem $P -Filter *.dll)) { foreach ($b in $bin) {
+            $dep += "== $($b.Name)"
+            $dep += (dumpbin /dependents $b.FullName 2>&1 | Where-Object { $_ -match '^\s+\S+\.(dll|DLL)\s*$' } | ForEach-Object { $_.Trim() })
+          } }
+          $dep | Out-File deps.txt
+          python .github\scripts\annotate_log.py --title "Imported DLLs" --file deps.txt --tail 60
           $subject = 'CN=NocturneDev'
           (Get-Content packaging\uwp\AppxManifest.xml -Raw).Replace('@PUBLISHER@', $subject).Replace('@VERSION@', '0.1.3.0') | Set-Content "$P\AppxManifest.xml" -Encoding utf8
           $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Directory | Where-Object Name -match '^10\.' | Sort-Object Name | Select-Object -Last 1
