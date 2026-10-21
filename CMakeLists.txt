@@ -42,6 +42,10 @@ option(NOCTURNE_GL_PRESENT "Present through OpenGL (OFF = legacy SDL_Renderer)" 
 # must contain GLES3/gl3.h and GLES2/gl2ext.h.
 option(NOCTURNE_GLES "Use OpenGL ES 3.0 (ANGLE) instead of desktop GL 3.3 core" OFF)
 option(NOCTURNE_UWP "Build for UWP / Xbox Dev Mode (set by cmake/toolchains/uwp-x64.cmake)" OFF)
+if(NOCTURNE_UWP)
+    # main.cpp lives in an object library, so this has to be set directory-wide, before any target.
+    add_compile_definitions(NOCTURNE_UWP_LAUNCHER=1)
+endif()
 set(NOCTURNE_ANGLE_INCLUDE_DIR "" CACHE PATH "ANGLE include directory (GLES3/gl3.h), used with NOCTURNE_GLES")
 
 option(NOCTURNE_USE_CCACHE
@@ -540,7 +544,6 @@ if(NOCTURNE_BUILD_EXE)
         target_sources(nocturne PRIVATE ${_L}/gfx.cpp ${_L}/app.cpp ${_L}/game_files.cpp ${_L}/imports.cpp
             ${_L}/settings_store.cpp ${_L}/launcher_main.cpp ${_L}/launcher_entry.cpp)
         target_include_directories(nocturne PRIVATE ${_L} "${CMAKE_SOURCE_DIR}/annotations/nocedit.exe/pseudocode/shims")
-        target_compile_definitions(nocturne PRIVATE NOCTURNE_UWP_LAUNCHER=1)
         # A UWP app starts at WinMain (SDL's WinRT shell, linked in as an extra object), not a
         # console main(); without this CMake appends /subsystem:console after ours.
         set_target_properties(nocturne PROPERTIES WIN32_EXECUTABLE ON)
