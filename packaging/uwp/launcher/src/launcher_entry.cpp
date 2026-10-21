@@ -5,11 +5,38 @@
 #include "core/data_root.h"
 
 #include <SDL.h>
+#include <windows.h>
+
+#include <cstdio>
 
 #include <filesystem>
 #include <string>
 
-extern "C" void nocturne_boot_log(const char *);
+// Breadcrumbs and a crash note in <LocalState>\startup.log: a UWP app that dies at start-up shows
+// nothing. Read it through Device Portal (File explorer > LocalAppData > the app > LocalState).
+extern "C" void nocturne_boot_log(const char *line) {
+    const std::string path = nocturne_data_path("startup.log");
+    FILE *f = std::fopen(path.c_str(), "a");
+    if (!f) return;
+    std::fprintf(f, "%s\n", line);
+    std::fclose(f);
+}
+
+static LONG CALLBACK boot_crash_handler(PEXCEPTION_POINTERS ep) {
+    const DWORD code = ep->ExceptionRecord->ExceptionCode;
+    static volatile LONG busy = 0;
+    if ((code & 0xF0000000u) != 0xC0000000u || InterlockedExchange(&busy, 1)) return EXCEPTION_CONTINUE_SEARCH;
+    char buf[200];
+    const char *base = reinterpret_cast<const char *>(GetModuleHandleW(nullptr));
+    std::snprintf(buf, sizeof buf, "EXCEPTION %08lx at exe+0x%llx (addr %p)", static_cast<unsigned long>(code),
+                  static_cast<unsigned long long>(static_cast<const char *>(ep->ExceptionRecord->ExceptionAddress) - base),
+                  ep->ExceptionRecord->ExceptionAddress);
+    nocturne_boot_log(buf);
+    InterlockedExchange(&busy, 0);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+extern "C" void nocturne_boot_init(void) { AddVectoredExceptionHandler(1, boot_crash_handler); }
 
 extern "C" int nocturne_uwp_run_launcher(void) {
     nocturne_boot_log("launcher: SDL_Init");

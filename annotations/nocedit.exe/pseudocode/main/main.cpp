@@ -39,32 +39,9 @@ static void runStaticInitializers(void)
 #ifdef NOCTURNE_UWP_LAUNCHER
 extern "C" int nocturne_uwp_run_launcher(void);
 
-// Breadcrumbs and a crash note in <LocalState>\startup.log, because a UWP app that dies at start-up
-// shows nothing. Read it through Device Portal (File explorer > LocalAppData > the app > LocalState).
-#include "core/data_root.h"
-#include <windows.h>
-extern "C" void nocturne_boot_log(const char *line)
-{
-    const std::string path = nocturne_data_path("startup.log");
-    FILE *f = fopen(path.c_str(), "a");
-    if (!f) return;
-    fprintf(f, "%s\n", line);
-    fclose(f);
-}
-static LONG CALLBACK bootCrashHandler(PEXCEPTION_POINTERS ep)
-{
-    const DWORD code = ep->ExceptionRecord->ExceptionCode;
-    static volatile LONG busy = 0;
-    if ((code & 0xF0000000u) != 0xC0000000u || InterlockedExchange(&busy, 1)) return EXCEPTION_CONTINUE_SEARCH;
-    char buf[200];
-    const char *base = (const char *)GetModuleHandleW(nullptr);
-    snprintf(buf, sizeof buf, "EXCEPTION %08lx at exe+0x%llx (addr %p)", (unsigned long)code,
-             (unsigned long long)((const char *)ep->ExceptionRecord->ExceptionAddress - base),
-             ep->ExceptionRecord->ExceptionAddress);
-    nocturne_boot_log(buf);
-    InterlockedExchange(&busy, 0);
-    return EXCEPTION_CONTINUE_SEARCH;
-}
+// Breadcrumbs and a crash note in <LocalState>\startup.log (defined in launcher_entry.cpp).
+extern "C" void nocturne_boot_log(const char *line);
+extern "C" void nocturne_boot_init(void);
 #endif
 
 // --version answers before anything is initialized: a bug report should be able
@@ -97,7 +74,7 @@ int main(int argc, char** argv)
 
 #ifdef NOCTURNE_UWP_LAUNCHER
     // Launcher first: settings and adding the game files. Quit there means quit the app.
-    AddVectoredExceptionHandler(1, bootCrashHandler);
+    nocturne_boot_init();
     nocturne_boot_log("--- start: SDL_main entered, launcher next");
     if (!nocturne_uwp_run_launcher()) { nocturne_boot_log("launcher: player quit"); return 0; }
     nocturne_boot_log("launcher done, starting the game");
