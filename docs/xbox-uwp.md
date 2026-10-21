@@ -148,3 +148,18 @@ Not covered by that page: memory limits, resolution limits, background suspensio
    copy of the game's data files into the app's local storage once item 5 exists.
 
 No game data is distributed with this project; you need your own copy of Nocturne.
+
+## Sideloadable package (CI: `uwp-link`)
+
+The `uwp-link` workflow links `nocturne.exe` for UWP x64 (launcher included, shown before the game),
+stages it with SDL2, ANGLE (`libEGL`, `libGLESv2`), `d3dcompiler_47.dll` and the launcher fonts, and
+produces a test-signed `NocturneDecomp.msix` plus the matching `NocturneDev.cer` (artifact
+`nocturne-uwp-package`). A fresh certificate is made on every run, so install the `.cer` that came
+with the `.msix` you deploy.
+
+**Status: builds and signs in CI. Never run on a console or on Windows.** Untested: that the package
+installs, that SDL's WinRT backend finds this ANGLE, the launcher's three import routes, memory limits.
+
+Deploy: Xbox in Dev Mode → Device Portal (`https://<console-ip>:11443`) → Add → choose the `.msix`
+(add the `.cer` if asked) → Start. Game files: use the launcher's Game files screen, or Device Portal
+→ File explorer → LocalAppData → the app → LocalState.
