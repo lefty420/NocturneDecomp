@@ -1,0 +1,111 @@
+name: uwp-link
+
+# Compiles the whole game (decompiled sources + shims + main) for UWP with clang-cl and links
+# it against the UWP builds of SDL2, SDL2_ttf/FreeType, FFmpeg and ANGLE headers. The library
+# builds are not repeated: this picks up the artifacts of their latest successful runs on this
+# branch (xbox-uwp: SDL2, libs-uwp: SDL2_ttf + FFmpeg, angle-uwp: ANGLE). See docs/xbox-uwp.md.
+on:
+  workflow_dispatch:
+  push:
+    branches: [xbox-uwp-gles-groundwork]
+    paths:
+      - '.github/workflows/uwp-link.yml'
+      - 'cmake/uwp_libs.cmake'
+      - 'cmake/toolchains/uwp-x64.cmake'
+      - 'CMakeLists.txt'
+
+jobs:
+  link:
+    runs-on: windows-latest
+    timeout-minutes: 340
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          uwp: true
+
+      - name: Assemble the UWP libraries from earlier builds
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $L = Join-Path $env:RUNNER_TEMP 'uwplibs'
+          New-Item -ItemType Directory -Force "$L\sdl", "$L\ttf", "$L\ffmpeg", "$L\angle", dl | Out-Null
+          $log = 'libs.txt'
+          function Latest($wf) {
+            (gh run list --repo $env:GITHUB_REPOSITORY --workflow $wf --branch xbox-uwp-gles-groundwork --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          }
+          $plan = @(
+            @{ wf='xbox-uwp.yml';  art='sdl2-uwp-x64';     dir='sdl' },
+            @{ wf='libs-uwp.yml';  art='sdl2-ttf-uwp-x64'; dir='ttf' },
+            @{ wf='libs-uwp.yml';  art='ffmpeg-uwp-x64';   dir='ffmpeg' },
+            @{ wf='angle-uwp.yml'; art='angle-uwp-x64';    dir='angle' })
+          foreach ($p in $plan) {
+            $id = Latest $p.wf
+            "$($p.art): run $id" | Out-File $log -Append
+            gh run download $id --repo $env:GITHUB_REPOSITORY -n $p.art -D "$L\$($p.dir)" 2>&1 | Out-File $log -Append
+          }
+          # SDL's headers (and its WinRT entry source) come from the source tree.
+          git clone -q --depth 1 -b SDL2 https://github.com/libsdl-org/SDL "$env:RUNNER_TEMP\sdlsrc"
+          Copy-Item "$env:RUNNER_TEMP\sdlsrc\include" "$L\sdl\include" -Recurse
+          # FFmpeg's static libraries are named .a by its build system; the linker wants .lib.
+          Get-ChildItem "$L\ffmpeg" -Recurse -Filter 'lib*.a' | ForEach-Object { Copy-Item $_.FullName ([IO.Path]::ChangeExtension($_.FullName, '.lib')) }
+          Get-ChildItem $L -Recurse -File | Where-Object { $_.Extension -in '.lib','.dll','.h' -and $_.FullName -notmatch '\\include\\' } |
+            ForEach-Object { "$($_.FullName.Replace($L,'')) $($_.Length)" } | Out-File $log -Append
+          python .github\scripts\annotate_log.py --title "UWP libraries" --file $log --tail 40
+          "UWPLIBS=$L" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Build the WinRT entry object (needs MSVC cl and /ZW)
+        shell: pwsh
+        run: |
+          $o = Join-Path $env:RUNNER_TEMP 'winrt_main.obj'
+          cl /nologo /c /ZW /EHsc /std:c++17 /DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0A00 "/I$env:UWPLIBS\sdl\include" `
+             "/Fo$o" "$env:RUNNER_TEMP\sdlsrc\src\main\winrt\SDL_winrt_main_NonXAML.cpp" 2>&1 | Tee-Object cl-winrt.txt
+          "WINRT_OBJ=$o" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          python .github\scripts\annotate_log.py --title "WinRT entry object" --file cl-winrt.txt --tail 8
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $objs = $env:WINRT_OBJ -replace '\\','/'
+          $libs = $env:UWPLIBS -replace '\\','/'
+          cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/uwp-x64.cmake `
+            -DNOCTURNE_BUILD_EXE=ON -DNOCTURNE_BUILD_CHECK=OFF -DNOCTURNE_USE_CCACHE=OFF `
+            "-DNOCTURNE_UWP_LIBS_DIR=$libs" "-DNOCTURNE_UWP_EXTRA_OBJECTS=$objs" "-DNOCTURNE_BUILD_TAG=exe-uwp-x64" *> configure.log
+          "configure exit: $LASTEXITCODE" | Out-File configure-exit.txt
+          python .github\scripts\annotate_log.py --title "Configure ($(Get-Content configure-exit.txt))" --file configure.log --tail 25 --max-errors 12
+          exit 0
+
+      - name: Compile and link
+        shell: pwsh
+        run: |
+          if (-not (Test-Path build\build.ninja)) { "no build.ninja: configure failed" | Out-File build.log; exit 0 }
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          cmake --build build --target nocturne -- -k 0 *> build.log
+          $code = $LASTEXITCODE
+          "build exit: $code after $([int]$sw.Elapsed.TotalMinutes) min" | Out-File build-exit.txt
+          python .github\scripts\annotate_log.py --title "Build ($(Get-Content build-exit.txt))" --file build.log --tail 12 --max-errors 14
+          # Group the errors by kind so the first screen shows what to fix first.
+          $errs = Select-String -Path build.log -Pattern 'error' | ForEach-Object { $_.Line }
+          $lnk  = $errs | Where-Object { $_ -match 'LNK\d+' } | Sort-Object -Unique
+          $cc   = $errs | Where-Object { $_ -notmatch 'LNK\d+' } | ForEach-Object { ($_ -replace '^.*?error: ', '') -replace "'[^']*'", "'_'" } | Group-Object | Sort-Object Count -Descending | Select-Object -First 12 | ForEach-Object { "$($_.Count)x $($_.Name)" }
+          ($cc -join "`n") | Out-File cc-families.txt
+          ($lnk | Select-Object -First 40) -join "`n" | Out-File link-errors.txt
+          if (Test-Path cc-families.txt) { python .github\scripts\annotate_log.py --title "Compile error families" --file cc-families.txt --tail 14 }
+          if ((Get-Item link-errors.txt).Length -gt 4) { python .github\scripts\annotate_log.py --title "Link errors" --file link-errors.txt --tail 30 }
+          exit 0
+
+      - name: Collect output
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out\uwp-link | Out-Null
+          Copy-Item *.log, *.txt out\uwp-link -ErrorAction SilentlyContinue
+          Get-ChildItem build -Filter 'nocturne.*' -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe','.pdb' } | ForEach-Object { Copy-Item $_.FullName out\uwp-link; "output: $($_.Name) $($_.Length)" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uwp-link-x64
+          path: out/uwp-link/

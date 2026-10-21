@@ -41,6 +41,7 @@ option(NOCTURNE_GL_PRESENT "Present through OpenGL (OFF = legacy SDL_Renderer)" 
 # NOCTURNE_GL_PRESENT it is defined only on the shim target. ANGLE_INCLUDE_DIR
 # must contain GLES3/gl3.h and GLES2/gl2ext.h.
 option(NOCTURNE_GLES "Use OpenGL ES 3.0 (ANGLE) instead of desktop GL 3.3 core" OFF)
+option(NOCTURNE_UWP "Build for UWP / Xbox Dev Mode (set by cmake/toolchains/uwp-x64.cmake)" OFF)
 set(NOCTURNE_ANGLE_INCLUDE_DIR "" CACHE PATH "ANGLE include directory (GLES3/gl3.h), used with NOCTURNE_GLES")
 
 option(NOCTURNE_USE_CCACHE
@@ -126,7 +127,12 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # pkg-config did, so the rest of this file is unchanged.
 set(NOCTURNE_FFMPEG_DEP "")
 if(NOCTURNE_BUILD_EXE)
-    include("${CMAKE_SOURCE_DIR}/cmake/bundledlibs.cmake")
+    if(NOCTURNE_UWP)
+        # UWP: prebuilt libraries (see cmake/uwp_libs.cmake), not a source build.
+        include("${CMAKE_SOURCE_DIR}/cmake/uwp_libs.cmake")
+    else()
+        include("${CMAKE_SOURCE_DIR}/cmake/bundledlibs.cmake")
+    endif()
 endif()
 
 # -----------------------------------------------------------------------------
@@ -522,7 +528,11 @@ if(NOCTURNE_BUILD_EXE)
     endforeach()
     target_link_libraries(nocturne PRIVATE nocturne_shims
         ${SDL2_LIBRARIES} ${SDL2TTF_LIBRARIES} ${FFMPEG_LIBRARIES})
-    if(WIN32)
+    if(NOCTURNE_UWP)
+        # Everything a UWP app may call comes through WindowsApp.lib (the toolchain file
+        # links it); ws2_32, winmm and version are desktop import libraries.
+        target_link_libraries(nocturne PRIVATE ${NOCTURNE_UWP_EXTRA_OBJECTS})
+    elseif(WIN32)
         # ws2_32 backs winsock_win32.c. The rest are what the kernel32 shim
         # reaches for once its POSIX arms give way to the Win32 ones: winmm for
         # the multimedia timer, version and imagehlp for the module queries.

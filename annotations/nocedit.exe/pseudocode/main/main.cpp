@@ -17,6 +17,9 @@
 #include "nocturne.h"
 #include "win32/shim_init.h"
 
+#if defined(_WIN32)
+#include <winapifamily.h>
+#endif
 #include <cstdio>
 #include <cstring>
 
@@ -45,7 +48,16 @@ static int wantsVersion(int argc, char** argv)
     return 0;
 }
 
+// UWP: the app is started by SDL's WinRT shell (SDL_winrt_main_NonXAML.cpp), which calls
+// SDL_main on a worker thread once the window exists. Everywhere else it is plain main().
+#if defined(_WIN32) && defined(WINAPI_FAMILY) && defined(WINAPI_FAMILY_APP) && WINAPI_FAMILY == WINAPI_FAMILY_APP
+#define NOCTURNE_ENTRY_IS_SDL_MAIN 1
+static int nocturne_main(int argc, char** argv);
+extern "C" int SDL_main(int argc, char** argv) { return nocturne_main(argc, argv); }
+static int nocturne_main(int argc, char** argv)
+#else
 int main(int argc, char** argv)
+#endif
 {
     if (wantsVersion(argc, argv)) {
         printf("%s\n", nocturne_version_line());
