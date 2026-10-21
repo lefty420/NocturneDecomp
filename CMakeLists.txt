@@ -534,6 +534,9 @@ if(NOCTURNE_BUILD_EXE)
         # ws2_32 (sockets) and bcrypt (FFmpeg's random seed) are permitted to UWP apps but are
         # not part of the umbrella library.
         target_link_libraries(nocturne PRIVATE ${NOCTURNE_UWP_EXTRA_OBJECTS} ws2_32 bcrypt)
+        # A UWP app starts at WinMain (SDL's WinRT shell, linked in as an extra object), not a
+        # console main(); without this CMake appends /subsystem:console after ours.
+        set_target_properties(nocturne PROPERTIES WIN32_EXECUTABLE ON)
     elseif(WIN32)
         # ws2_32 backs winsock_win32.c. The rest are what the kernel32 shim
         # reaches for once its POSIX arms give way to the Win32 ones: winmm for
