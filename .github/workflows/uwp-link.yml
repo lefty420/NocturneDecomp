@@ -50,6 +50,9 @@ jobs:
           # SDL's headers (and its WinRT entry source) come from the source tree.
           git clone -q --depth 1 -b SDL2 https://github.com/libsdl-org/SDL "$env:RUNNER_TEMP\sdlsrc"
           Copy-Item "$env:RUNNER_TEMP\sdlsrc\include" "$L\sdl\include" -Recurse
+          # A couple of shims spell it <SDL2/SDL.h>: give that form a home too.
+          New-Item -ItemType Directory -Force "$L\sdl\inc" | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\sdlsrc\include" "$L\sdl\inc\SDL2" -Recurse
           # FFmpeg's static libraries are named .a by its build system; the linker wants .lib.
           Get-ChildItem "$L\ffmpeg" -Recurse -Filter 'lib*.a' | ForEach-Object { Copy-Item $_.FullName ([IO.Path]::ChangeExtension($_.FullName, '.lib')) }
           Get-ChildItem $L -Recurse -File | Where-Object { $_.Extension -in '.lib','.dll','.h' -and $_.FullName -notmatch '\\include\\' } |

@@ -3,7 +3,7 @@
 # library builds. Replaces bundledlibs.cmake (which builds mingw/Linux versions from
 # source) when NOCTURNE_UWP is on, and sets the same variables it does.
 #
-#   <NOCTURNE_UWP_LIBS_DIR>/sdl/{include/, SDL2.lib, SDL2.dll}
+#   <NOCTURNE_UWP_LIBS_DIR>/sdl/{include/, inc/SDL2/, SDL2.lib, SDL2.dll}
 #   <NOCTURNE_UWP_LIBS_DIR>/ttf/{SDL_ttf.h, SDL2_ttf.lib, freetype.lib}
 #   <NOCTURNE_UWP_LIBS_DIR>/ffmpeg/{include/, lib/libav*.lib, lib/libsw*.lib}
 #   <NOCTURNE_UWP_LIBS_DIR>/angle/{include/, libEGL.dll, libGLESv2.dll}
@@ -12,7 +12,8 @@ if(NOT NOCTURNE_UWP_LIBS_DIR OR NOT IS_DIRECTORY "${NOCTURNE_UWP_LIBS_DIR}")
     message(FATAL_ERROR "NOCTURNE_UWP is on but NOCTURNE_UWP_LIBS_DIR is not a directory: '${NOCTURNE_UWP_LIBS_DIR}'")
 endif()
 
-set(SDL2_INCLUDE_DIRS "${NOCTURNE_UWP_LIBS_DIR}/sdl/include")
+# sdl/inc/SDL2 is a copy of the headers, for the shims that write <SDL2/SDL.h>.
+set(SDL2_INCLUDE_DIRS "${NOCTURNE_UWP_LIBS_DIR}/sdl/include" "${NOCTURNE_UWP_LIBS_DIR}/sdl/inc")
 set(SDL2_CFLAGS_OTHER "")
 set(SDL2_LIBRARIES    "${NOCTURNE_UWP_LIBS_DIR}/sdl/SDL2.lib")
 
