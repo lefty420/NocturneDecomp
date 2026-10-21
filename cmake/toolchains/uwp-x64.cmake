@@ -20,10 +20,17 @@ set(_NOCTURNE_TARGET_FLAGS "/DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0
 set(CMAKE_C_FLAGS_INIT   "${_NOCTURNE_TARGET_FLAGS}")
 set(CMAKE_CXX_FLAGS_INIT "${_NOCTURNE_TARGET_FLAGS} /EHsc")
 
+# The release (dynamic) CRT in every configuration: the debug CRT is not deployable to a
+# console. The code is otherwise built unoptimised, like the project's other lanes (the
+# decompiled code relies on x86 behaviours that optimisation can break).
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+# The compiler probe would otherwise try to link a console exe against desktop libraries.
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
 # Only the umbrella library: kernel32.lib & co. are desktop-only and a UWP app that
 # links them is rejected by the store checks.
-set(CMAKE_C_STANDARD_LIBRARIES_INIT   "WindowsApp.lib")
-set(CMAKE_CXX_STANDARD_LIBRARIES_INIT "WindowsApp.lib")
+set(CMAKE_C_STANDARD_LIBRARIES_INIT   "WindowsApp.lib runtimeobject.lib")
+set(CMAKE_CXX_STANDARD_LIBRARIES_INIT "WindowsApp.lib runtimeobject.lib")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "/APPCONTAINER /SUBSYSTEM:WINDOWS /MANIFEST:NO")
 
 set(NOCTURNE_UWP ON CACHE BOOL "Building for UWP" FORCE)
