@@ -13,6 +13,9 @@ on:
       - 'cmake/uwp_libs.cmake'
       - 'cmake/toolchains/uwp-x64.cmake'
       - 'CMakeLists.txt'
+      - 'annotations/nocedit.exe/pseudocode/main/**'
+      - 'annotations/nocedit.exe/pseudocode/include/system/**'
+      - 'annotations/nocedit.exe/pseudocode/shims/**'
 
 jobs:
   link:
