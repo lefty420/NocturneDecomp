@@ -132,6 +132,15 @@ jobs:
           # ANGLE compiles shaders with the D3D compiler, which a UWP app has to bring itself.
           $d3d = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Redist" -Recurse -Filter d3dcompiler_47.dll -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
           if ($d3d) { Copy-Item $d3d.FullName $P } else { "d3dcompiler_47.dll NOT FOUND" | Out-File $log -Append }
+          # The UWP C++ runtime (vcruntime140_app and friends) normally comes from the Microsoft.VCLibs
+          # framework package. Without it the app dies at launch with no message, so carry the DLLs
+          # beside the exe instead; they live inside the VCLibs .appx that ships with the SDK.
+          $vcl = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft SDKs\Windows Kits\10\ExtensionSDKs\Microsoft.VCLibs" -Recurse -Filter 'Microsoft.VCLibs.x64.14.00.appx' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'Retail' } | Select-Object -First 1
+          if ($vcl) {
+            Copy-Item $vcl.FullName vclibs.zip
+            Expand-Archive vclibs.zip -DestinationPath vclibs -Force
+            Get-ChildItem vclibs -Filter *.dll | ForEach-Object { Copy-Item $_.FullName $P; "runtime: $($_.Name)" | Out-File $log -Append }
+          } else { "VCLibs appx NOT FOUND" | Out-File $log -Append }
           Copy-Item packaging\uwp\launcher\assets\fonts\*.ttf "$P\fonts"
           python -m pip install -q pillow 2>&1 | Out-Null
           python .github\scripts\make_logos.py "$P\Assets"
