@@ -299,12 +299,23 @@ extern void* _memset(void* dest, int value, size_t count);
 // reason as <io.h>.
 #define chdir nocturne_watcom_chdir
 #define sleep nocturne_watcom_sleep
+// The game depends on Watcom's exact rand()/srand() sequence, so the shims define their own.
+// The mingw and Linux linkers let an executable's definition win over the C library's; the
+// Microsoft linker reports a duplicate symbol against the UCRT import library instead, so the
+// shims' versions get their own names here. The same goes for _mkdir, whose Watcom semantics
+// (-1 when the directory already exists) differ from the UCRT's.
+#define rand nocturne_watcom_rand
+#define srand nocturne_watcom_srand
+#define _mkdir nocturne_watcom_mkdir
 #endif
 extern long tell(int fd);
 extern int chsize(int fd, long size);
 #ifdef _MSC_VER
 extern int chdir(const char *path);
 extern unsigned int sleep(unsigned int seconds);
+extern "C" int rand(void);
+extern "C" void srand(unsigned int seed);
+extern int _mkdir(const char *path);
 #endif
 
 // access() mode flags
