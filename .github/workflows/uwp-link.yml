@@ -13,6 +13,7 @@ on:
       - 'cmake/uwp_libs.cmake'
       - 'cmake/toolchains/uwp-x64.cmake'
       - 'CMakeLists.txt'
+      - 'packaging/uwp/launcher/**'
       - 'annotations/nocedit.exe/pseudocode/main/**'
       - 'annotations/nocedit.exe/pseudocode/include/system/**'
       - 'annotations/nocedit.exe/pseudocode/shims/**'
@@ -69,7 +70,11 @@ jobs:
           $o = Join-Path $env:RUNNER_TEMP 'winrt_main.obj'
           cl /nologo /c /ZW /EHsc /std:c++17 /DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0A00 "/I$env:UWPLIBS\sdl\include" `
              "/Fo$o" "$env:RUNNER_TEMP\sdlsrc\src\main\winrt\SDL_winrt_main_NonXAML.cpp" 2>&1 | Tee-Object cl-winrt.txt
-          "WINRT_OBJ=$o" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          # The launcher's C++/CX import providers (folder picker, USB) also need cl /ZW.
+          $p = Join-Path $env:RUNNER_TEMP 'imports_uwp.obj'
+          cl /nologo /c /ZW /EHsc /MD /std:c++17 /utf-8 /DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0A00 "/I$env:UWPLIBS\sdl\include" `
+             "/I$PWD\packaging\uwp\launcher\src" "/Fo$p" "$PWD\packaging\uwp\launcher\src\imports_platform_uwp.cpp" 2>&1 | Tee-Object -Append cl-winrt.txt
+          "WINRT_OBJ=$o;$p" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           python .github\scripts\annotate_log.py --title "WinRT entry object" --file cl-winrt.txt --tail 8
 
       - name: Configure

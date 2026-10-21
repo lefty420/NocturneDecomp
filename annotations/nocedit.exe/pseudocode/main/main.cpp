@@ -36,6 +36,10 @@ static void runStaticInitializers(void)
     }
 }
 
+#ifdef NOCTURNE_UWP_LAUNCHER
+extern "C" int nocturne_uwp_run_launcher(void);
+#endif
+
 // --version answers before anything is initialized: a bug report should be able
 // to get the build's identity out of a binary that cannot open a window, load a
 // POD or reach a GL context.
@@ -64,6 +68,10 @@ int main(int argc, char** argv)
         return 0;
     }
 
+#ifdef NOCTURNE_UWP_LAUNCHER
+    // Launcher first: settings and adding the game files. Quit there means quit the app.
+    if (!nocturne_uwp_run_launcher()) return 0;
+#endif
     shims_init_all();
     runStaticInitializers();
 

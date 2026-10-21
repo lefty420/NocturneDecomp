@@ -534,6 +534,13 @@ if(NOCTURNE_BUILD_EXE)
         # ws2_32 (sockets) and bcrypt (FFmpeg's random seed) are permitted to UWP apps but are
         # not part of the umbrella library.
         target_link_libraries(nocturne PRIVATE ${NOCTURNE_UWP_EXTRA_OBJECTS} ws2_32 bcrypt)
+        # The launcher screen (settings + adding game files) runs before the game. Its C++/CX
+        # import providers are an extra object (needs cl /ZW); the rest builds here.
+        set(_L "${CMAKE_SOURCE_DIR}/packaging/uwp/launcher/src")
+        target_sources(nocturne PRIVATE ${_L}/gfx.cpp ${_L}/app.cpp ${_L}/game_files.cpp ${_L}/imports.cpp
+            ${_L}/settings_store.cpp ${_L}/launcher_main.cpp ${_L}/launcher_entry.cpp)
+        target_include_directories(nocturne PRIVATE ${_L} "${CMAKE_SOURCE_DIR}/annotations/nocedit.exe/pseudocode/shims")
+        target_compile_definitions(nocturne PRIVATE NOCTURNE_UWP_LAUNCHER=1)
         # A UWP app starts at WinMain (SDL's WinRT shell, linked in as an extra object), not a
         # console main(); without this CMake appends /subsystem:console after ours.
         set_target_properties(nocturne PROPERTIES WIN32_EXECUTABLE ON)
