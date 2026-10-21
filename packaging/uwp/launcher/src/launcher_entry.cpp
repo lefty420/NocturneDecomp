@@ -36,7 +36,16 @@ static LONG CALLBACK boot_crash_handler(PEXCEPTION_POINTERS ep) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-extern "C" void nocturne_boot_init(void) { AddVectoredExceptionHandler(1, boot_crash_handler); }
+// AddVectoredExceptionHandler is not declared for UWP, so look it up at run time.
+extern "C" void nocturne_boot_init(void) {
+    typedef PVOID(WINAPI * AddVehFn)(ULONG, PVECTORED_EXCEPTION_HANDLER);
+    for (const wchar_t *mod : {L"kernelbase.dll", L"kernel32.dll"}) {
+        HMODULE h = GetModuleHandleW(mod);
+        AddVehFn fn = h ? reinterpret_cast<AddVehFn>(reinterpret_cast<void *>(GetProcAddress(h, "AddVectoredExceptionHandler"))) : nullptr;
+        if (fn) { fn(1, boot_crash_handler); return; }
+    }
+    nocturne_boot_log("note: no exception handler available");
+}
 
 extern "C" int nocturne_uwp_run_launcher(void) {
     nocturne_boot_log("launcher: SDL_Init");
