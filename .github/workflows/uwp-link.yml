@@ -71,8 +71,8 @@ jobs:
         run: |
           $objs = $env:WINRT_OBJ -replace '\\','/'
           $libs = $env:UWPLIBS -replace '\\','/'
-          cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/uwp-x64.cmake `
-            -DNOCTURNE_BUILD_EXE=ON -DNOCTURNE_BUILD_CHECK=OFF -DNOCTURNE_USE_CCACHE=OFF `
+          cmake -S . -B build -G Ninja "-DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/uwp-x64.cmake" `
+            "-DNOCTURNE_BUILD_EXE=ON" "-DNOCTURNE_BUILD_CHECK=OFF" "-DNOCTURNE_USE_CCACHE=OFF" `
             "-DNOCTURNE_UWP_LIBS_DIR=$libs" "-DNOCTURNE_UWP_EXTRA_OBJECTS=$objs" "-DNOCTURNE_BUILD_TAG=exe-uwp-x64" *> configure.log
           "configure exit: $LASTEXITCODE" | Out-File configure-exit.txt
           python .github\scripts\annotate_log.py --title "Configure ($(Get-Content configure-exit.txt))" --file configure.log --tail 25 --max-errors 12
