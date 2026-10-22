@@ -38,6 +38,10 @@ static LONG CALLBACK boot_crash_handler(PEXCEPTION_POINTERS ep) {
 
 // AddVectoredExceptionHandler is not declared for UWP, so look it up at run time.
 extern "C" void nocturne_boot_init(void) {
+    // The game reports problems on stderr, which a UWP app has nowhere to show: keep it in a file.
+    const std::string errpath = nocturne_data_path("stderr.log");
+    if (std::freopen(errpath.c_str(), "a", stderr)) std::setvbuf(stderr, nullptr, _IONBF, 0);
+
     typedef PVOID(WINAPI * AddVehFn)(ULONG, PVECTORED_EXCEPTION_HANDLER);
     for (const wchar_t *mod : {L"kernelbase.dll", L"kernel32.dll"}) {
         HMODULE h = GetModuleHandleW(mod);
