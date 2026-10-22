@@ -364,18 +364,12 @@ void _atexit(WatcomStaticDestructorNode* node) {
 }
 
 #ifdef _MSC_VER
-// chdir() and sleep() for the Microsoft toolchain (see system/watcom.h, which
-// renames them). Only the game's in-engine editor tools call chdir, to move around
+// chdir() for the Microsoft toolchain (see system/watcom.h, which renames it; sleep() is above). Only the game's in-engine editor tools call chdir, to move around
 // a directory browser; a UWP app cannot change its working directory, so it reports
 // failure the way any chdir that did not succeed would. sleep() keeps its POSIX
 // meaning (seconds), which is what it means on the Linux and mingw builds.
 int chdir(const char *) {
     errno = ENOSYS;
     return -1;
-}
-
-unsigned int sleep(unsigned int seconds) {
-    std::this_thread::sleep_for(std::chrono::seconds(seconds));
-    return 0;
 }
 #endif  // _MSC_VER
