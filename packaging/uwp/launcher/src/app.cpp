@@ -419,7 +419,7 @@ void App::draw_play() {
     const Rect left{kMarginX, kContentY, 1080, kContentH};
     const Rect right{kMarginX + 1080 + 32, kContentY, kContentW - 1080 - 32, kContentH};
     panel(left, "STATUS");
-    if (!cover_tried_) { cover_tried_ = true; cover_ = g_.load_bmp((root_ / "cover.bmp").string(), &cover_w_, &cover_h_); }
+    if (!cover_tried_) { cover_tried_ = true; cover_ = load_cover(); }
     const bool has_cover = cover_ != nullptr;
     if (has_cover) {
         g_.rrect(right, 28, kPanel);
@@ -639,11 +639,22 @@ void App::draw_settings() {
     g_.text(lx + 152, cy + R + 82, "What the game sees", 22, kMuted);
 }
 
-// The box art, if the player has put cover.bmp in the data folder. It is not shipped with the app.
+// The box art: cover.bmp in the data folder (so the player can swap it), else the one in the package.
+SDL_Texture *App::load_cover() {
+    SDL_Texture *t = g_.load_bmp((root_ / "cover.bmp").string(), &cover_w_, &cover_h_);
+    if (t) return t;
+    char *base = SDL_GetBasePath();
+    if (base) {
+        t = g_.load_bmp((fs::path(base) / "cover.bmp").string(), &cover_w_, &cover_h_);
+        SDL_free(base);
+    }
+    return t;
+}
+
 void App::draw_cover(const Rect &p) {
     if (!cover_tried_) {
         cover_tried_ = true;
-        cover_ = g_.load_bmp((root_ / "cover.bmp").string(), &cover_w_, &cover_h_);
+        cover_ = load_cover();
     }
     if (cover_ && cover_w_ > 0 && cover_h_ > 0) {
         const Rect box = p.inset(12);
@@ -654,7 +665,7 @@ void App::draw_cover(const Rect &p) {
     } else {
         g_.text_center(p.cx(), p.cy() - 60, "NOCTURNE", 44, kMuted, FontFace::Bold, 6.0f);
         int n = 0;
-        for (const std::string &l : wrap("Put a picture named cover.bmp in the app's data folder to show the box art here.", p.w - 80, 22))
+        for (const std::string &l : wrap("No box art found. Put a picture named cover.bmp in the app's data folder to show it here.", p.w - 80, 22))
             g_.text_center(p.cx(), p.cy() + 10 + 32 * n++, l, 22, kFaint);
     }
 }
