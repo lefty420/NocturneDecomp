@@ -77,6 +77,11 @@ private:
     void draw_files();
     void draw_settings();
     void draw_about();
+    void draw_story();
+    void draw_cover(const Rect &panel_rect);
+    SDL_Texture *cover_ = nullptr;   // optional box art: cover.bmp in the data folder
+    int cover_w_ = 0, cover_h_ = 0;
+    bool cover_tried_ = false;
     void draw_modal();
     void draw_toast();
 

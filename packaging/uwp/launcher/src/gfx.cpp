@@ -324,4 +324,21 @@ std::string Gfx::fit(const std::string &s, float max_w, int px, FontFace f) {
     return dots;
 }
 
+SDL_Texture *Gfx::load_bmp(const std::string &path, int *w, int *h) {
+    SDL_Surface *surf = SDL_LoadBMP(path.c_str());
+    if (!surf) return nullptr;
+    SDL_Texture *tex = SDL_CreateTextureFromSurface(r_, surf);
+    if (w) *w = surf->w;
+    if (h) *h = surf->h;
+    SDL_FreeSurface(surf);
+    if (tex) SDL_SetTextureScaleMode(tex, SDL_ScaleModeLinear);
+    return tex;
+}
+
+void Gfx::image(SDL_Texture *tex, const Rect &dst) {
+    if (!tex) return;
+    const SDL_FRect d{dst.x, dst.y, dst.w, dst.h};
+    SDL_RenderCopyF(r_, tex, nullptr, &d);
+}
+
 }  // namespace nl

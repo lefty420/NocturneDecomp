@@ -31,7 +31,8 @@ constexpr float kContentY = 250;
 constexpr float kContentH = 700;
 constexpr float kContentW = kDesignW - 2 * kMarginX;
 
-const char *kTabNames[4] = {"Play", "Game files", "Settings", "About"};
+constexpr int kTabCount = 5;
+const char *kTabNames[kTabCount] = {"Play", "Game files", "Settings", "The game", "About"};
 
 float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -66,6 +67,7 @@ App::~App() {
     }
     if (scan_.valid()) scan_.wait();
     if (probe_.valid()) probe_.wait();
+    if (cover_) SDL_DestroyTexture(cover_);
 }
 
 void App::start_scan() {
@@ -129,6 +131,8 @@ void App::close_import() {
         job_.reset();
     }
     modal_ = Modal::None;
+    cover_tried_ = false;
+    if (cover_) { SDL_DestroyTexture(cover_); cover_ = nullptr; }
     start_scan();
 }
 
@@ -187,13 +191,13 @@ void App::handle(Input in) {
     }
 
     if (in == Input::PrevTab || in == Input::NextTab) {
-        tab_ = (tab_ + (in == Input::NextTab ? 1 : 3)) % 4;
+        tab_ = (tab_ + (in == Input::NextTab ? 1 : kTabCount - 1)) % kTabCount;
         focus_ = 0;
         return;
     }
     if (in_tabs_) {
-        if (in == Input::Left) { tab_ = (tab_ + 3) % 4; focus_ = 0; }
-        else if (in == Input::Right) { tab_ = (tab_ + 1) % 4; focus_ = 0; }
+        if (in == Input::Left) { tab_ = (tab_ + kTabCount - 1) % kTabCount; focus_ = 0; }
+        else if (in == Input::Right) { tab_ = (tab_ + 1) % kTabCount; focus_ = 0; }
         else if ((in == Input::Down || in == Input::Accept) && content_rows() > 0) in_tabs_ = false;
         return;
     }
@@ -347,8 +351,8 @@ void App::draw_tabs() {
     float x = kMarginX + 64;
     const float y = 150, h = 60, gap = 10;
     float sel_x = 0, sel_w = 0;
-    float xs[4], ws[4];
-    for (int i = 0; i < 4; ++i) {
+    float xs[kTabCount], ws[kTabCount];
+    for (int i = 0; i < kTabCount; ++i) {
         ws[i] = g_.text_width(kTabNames[i], 28, FontFace::Bold) + 60;
         xs[i] = x;
         x += ws[i] + gap;
@@ -360,13 +364,13 @@ void App::draw_tabs() {
     const Rect pill{tab_x_.v, y, tab_w_.v, h};
     g_.rrect(pill, h * 0.5f, in_tabs_ ? kAccent : kAccent.alpha(0.85f));
     if (in_tabs_) g_.rrect_outline(pill, h * 0.5f, 3.0f, kText);
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < kTabCount; ++i) {
         g_.text_center(xs[i] + ws[i] * 0.5f, y + 13, kTabNames[i], 28, i == tab_ ? kText : kMuted, FontFace::Bold);
     }
     // Shoulder-button hints either side of the tabs.
     float hx = kMarginX;
     pad_glyph(hx, y + 15, "LB", kText);
-    pad_glyph(xs[3] + ws[3] + 20, y + 15, "RB", kText);
+    pad_glyph(xs[kTabCount - 1] + ws[kTabCount - 1] + 20, y + 15, "RB", kText);
 }
 
 void App::draw_footer() {
@@ -397,7 +401,15 @@ void App::draw_play() {
     const Rect left{kMarginX, kContentY, 1080, kContentH};
     const Rect right{kMarginX + 1080 + 32, kContentY, kContentW - 1080 - 32, kContentH};
     panel(left, "STATUS");
-    panel(right, "AT A GLANCE");
+    if (!cover_tried_) { cover_tried_ = true; cover_ = g_.load_bmp((root_ / "cover.bmp").string(), &cover_w_, &cover_h_); }
+    const bool has_cover = cover_ != nullptr;
+    if (has_cover) {
+        g_.rrect(right, 28, kPanel);
+        g_.rrect_outline(right, 28, 1.5f, kBorder);
+        draw_cover(right);
+    } else {
+        panel(right, "AT A GLANCE");
+    }
 
     const bool ready = scanned_once_ && scan_result_.ready;
     const bool checking = !scanned_once_;
@@ -462,16 +474,18 @@ void App::draw_play() {
         g_.text(btn.x + 4, btn.bottom() + 24, "Controller settings are on the Settings tab", 24, kFaint);
     }
 
-    // Right: a few facts.
+    // Right: a few facts (the box art takes this space when cover.bmp is present).
     auto row = [&](float ry, const char *label, const std::string &value, Color vc) {
         g_.text(right.x + 40, ry, label, 22, kMuted);
         g_.text(right.x + 40, ry + 32, g_.fit(value, right.w - 80, 28, FontFace::Medium), 28, vc);
     };
+    if (!has_cover) {
     row(right.y + 100, "GAME FILES", checking ? "Checking..." : ready ? "All required files found" : "Incomplete",
         checking ? kMuted : ready ? kOk : kWarn);
     row(right.y + 220, "CONTROLLER", controller_.empty() ? "None detected" : controller_, controller_.empty() ? kWarn : kText);
     row(right.y + 340, "STICK DEADZONE", pct(settings_.stick_deadzone), kText);
     row(right.y + 460, "DATA FOLDER", root_.string(), kText);
+    }
 }
 
 void App::draw_files() {
@@ -607,6 +621,54 @@ void App::draw_settings() {
     g_.text(lx + 152, cy + R + 82, "What the game sees", 22, kMuted);
 }
 
+// The box art, if the player has put cover.bmp in the data folder. It is not shipped with the app.
+void App::draw_cover(const Rect &p) {
+    if (!cover_tried_) {
+        cover_tried_ = true;
+        cover_ = g_.load_bmp((root_ / "cover.bmp").string(), &cover_w_, &cover_h_);
+    }
+    if (cover_ && cover_w_ > 0 && cover_h_ > 0) {
+        const Rect box = p.inset(12);
+        const float k = std::min(box.w / cover_w_, box.h / cover_h_);
+        const Rect img{box.cx() - cover_w_ * k * 0.5f, box.cy() - cover_h_ * k * 0.5f, cover_w_ * k, cover_h_ * k};
+        g_.rrect(img.inset(-3), 6, kBorder);
+        g_.image(cover_, img);
+    } else {
+        g_.text_center(p.cx(), p.cy() - 60, "NOCTURNE", 44, kMuted, FontFace::Bold, 6.0f);
+        int n = 0;
+        for (const std::string &l : wrap("Put a picture named cover.bmp in the app's data folder to show the box art here.", p.w - 80, 22))
+            g_.text_center(p.cx(), p.cy() + 10 + 32 * n++, l, 22, kFaint);
+    }
+}
+
+void App::draw_story() {
+    const Rect art{kMarginX, kContentY, 565, kContentH};
+    const Rect text{art.right() + 32, kContentY, kContentW - 565 - 32, kContentH};
+    g_.rrect(art, 28, kPanel);
+    g_.rrect_outline(art, 28, 1.5f, kBorder);
+    draw_cover(art);
+    panel(text, "THE GAME");
+    float y = text.y + 84;
+    g_.text(text.x + 40, y, "Nocturne", 40, kText, FontFace::Bold);
+    y += 62;
+    auto body = [&](const std::string &s) {
+        for (const std::string &l : wrap(s, text.w - 80, 23)) {
+            g_.text(text.x + 40, y, l, 23, kMuted);
+            y += 33;
+        }
+    };
+    body("Nocturne is a 1999 survival horror game by Terminal Reality in which you play a monster hunter called The Stranger.");
+    y += 18;
+    g_.text(text.x + 40, y, "PLOT", 20, kAccentSoft, FontFace::Bold, 3.0f);
+    y += 36;
+    body("At the end of the Prohibition, and the beginning of the Great Depression in the United States of America, "
+         "The Stranger is a mysterious operative of a secret organization known as Spookhouse, founded by President "
+         "Theodore Roosevelt to combat supernatural creatures. He investigates four cases, which can be played in any "
+         "order and involve teaming up with a half-vampire to retrieve a powerful artifact from a castle in Germany, "
+         "liberating a Wild West town from a zombie assault, fighting reanimated mobsters created by the mafia boss "
+         "Al Capone in Chicago, and solving the mystery of a house with deadly traps.");
+}
+
 void App::draw_about() {
     const Rect all{kMarginX, kContentY, kContentW, kContentH};
     panel(all, "ABOUT");
@@ -713,6 +775,7 @@ void App::draw() {
         case 0: draw_play(); break;
         case 1: draw_files(); break;
         case 2: draw_settings(); break;
+        case 3: draw_story(); break;
         default: draw_about(); break;
     }
     draw_footer();

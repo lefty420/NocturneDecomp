@@ -64,6 +64,12 @@ public:
     // Shortens `s` with an ellipsis so it fits in `max_w`.
     std::string fit(const std::string &s, float max_w, int px, FontFace f = FontFace::Medium);
 
+    // A 24/32-bit .bmp from disk as a texture (SDL reads these itself, no image library needed).
+    // Null when the file is missing or unreadable. The caller destroys the texture.
+    SDL_Texture *load_bmp(const std::string &path, int *w, int *h);
+    // Draws `tex` scaled into `dst` (design-space rectangle).
+    void image(SDL_Texture *tex, const Rect &dst);
+
     SDL_Renderer *renderer() const { return r_; }
 
 private:

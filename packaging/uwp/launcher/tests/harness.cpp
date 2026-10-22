@@ -203,8 +203,30 @@ int main(int argc, char **argv) {
         nocturne_launcher_settings_defaults(&d);
         EXPECT(s.stick_deadzone == d.stick_deadzone && s.invert_look == d.invert_look);
 
-        app.debug_select_tab(3);
+        app.debug_select_tab(4);
         shot.save(app, "11_about");
+        app.debug_select_tab(3);
+        shot.save(app, "12_story_no_cover");
+    }
+
+    // ---- Scenario 4: box art present (a generated stand-in, not the real cover) ----------
+    {
+        const fs::path data = tmp / "data";
+        SDL_Surface *c = SDL_CreateRGBSurfaceWithFormat(0, 400, 500, 24, SDL_PIXELFORMAT_RGB24);
+        for (int y = 0; y < 500; ++y)
+            for (int x = 0; x < 400; ++x) {
+                Uint8 *px = static_cast<Uint8 *>(c->pixels) + y * c->pitch + x * 3;
+                px[0] = static_cast<Uint8>(40 + y / 4);
+                px[1] = static_cast<Uint8>(60 + x / 8);
+                px[2] = 90;
+            }
+        EXPECT(SDL_SaveBMP(c, (data / "cover.bmp").string().c_str()) == 0);
+        SDL_FreeSurface(c);
+        App app(gfx, data, {});
+        app.debug_wait_scan();
+        shot.save(app, "13_play_with_cover");
+        app.debug_select_tab(3);
+        shot.save(app, "14_story_with_cover");
     }
 
     fs::remove_all(tmp);
