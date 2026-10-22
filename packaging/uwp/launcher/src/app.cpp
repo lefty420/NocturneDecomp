@@ -66,7 +66,6 @@ App::~App() {
         if (job_->thread.joinable()) job_->thread.join();
     }
     if (scan_.valid()) scan_.wait();
-    if (probe_.valid()) probe_.wait();
     if (cover_) SDL_DestroyTexture(cover_);
 }
 
@@ -87,21 +86,40 @@ void App::finish_scan_if_ready() {
         std::vector<std::pair<size_t, std::function<std::string()>>> probes;
         for (size_t i = 0; i < providers_.size(); i++)
             if (providers_[i].probe) probes.emplace_back(i, providers_[i].probe);
-        if (!probes.empty())
-            probe_ = std::async(std::launch::async, [probes] {
+        if (!probes.empty()) {
+            auto state = std::make_shared<ProbeState>();
+            probe_ = state;
+            std::thread([state, probes] {
+                size_t idx = 0;
+                std::string where;
                 for (auto &pr : probes) {
-                    std::string where = pr.second();
-                    if (!where.empty()) return std::make_pair(pr.first, where);
+                    where = pr.second();
+                    if (!where.empty()) { idx = pr.first; break; }
                 }
-                return std::make_pair(static_cast<size_t>(0), std::string());
-            });
+                std::lock_guard<std::mutex> lock(state->m);
+                state->index = idx;
+                state->where = where;
+                state->done = true;
+            }).detach();
+        }
     }
-    if (probe_.valid() && probe_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-        auto found = probe_.get();
-        if (!found.second.empty() && !job_ && modal_ == Modal::None) {
-            toast_text_ = "Found game files on " + found.second;
-            toast_ = 2.5f;
-            start_import(found.first);
+    if (probe_) {
+        size_t idx = 0;
+        std::string where;
+        bool done = false;
+        {
+            std::lock_guard<std::mutex> lock(probe_->m);
+            done = probe_->done;
+            idx = probe_->index;
+            where = probe_->where;
+        }
+        if (done) {
+            probe_.reset();
+            if (!where.empty() && !job_ && modal_ == Modal::None) {
+                toast_text_ = "Found game files on " + where;
+                toast_ = 2.5f;
+                start_import(idx);
+            }
         }
     }
 }

@@ -12,6 +12,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -115,7 +116,15 @@ private:
     ScanResult scan_result_;
     bool scanned_once_ = false;
     bool auto_probed_ = false;                 // the start-up drive check has been started
-    std::future<std::pair<size_t, std::string>> probe_;  // provider index and where it found files
+    // The start-up drive check runs on a detached thread: on a console the removable-storage call can
+    // block indefinitely, and the launcher must still be able to close and start the game.
+    struct ProbeState {
+        std::mutex m;
+        bool done = false;
+        size_t index = 0;
+        std::string where;
+    };
+    std::shared_ptr<ProbeState> probe_;
 
     std::unique_ptr<Job> job_;
     Ease tab_x_, tab_w_, focus_y_;
