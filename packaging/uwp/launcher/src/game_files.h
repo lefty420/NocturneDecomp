@@ -11,6 +11,9 @@
 
 namespace nl {
 
+// Installer programs, DLLs and logs from the original install are not needed and are not copied.
+bool worth_copying(const std::string &filename);
+
 // One thing the game wants in its data folder. PROVISIONAL: these names come from the
 // paths the decompiled code opens (art/*.raw, world/*.msn, ...), not from a checked
 // retail install. Edit kChecks in game_files.cpp if the real layout differs.
@@ -20,6 +23,7 @@ struct FileCheck {
     const char *pattern;   // file pattern inside it ("*" for anything)
     int min_count;         // how many matching files make it "present"
     bool required;         // optional items never block Play
+    bool counts;           // included in the totals shown to the player
 };
 
 enum class CheckState { Ok, Missing, OptionalMissing };

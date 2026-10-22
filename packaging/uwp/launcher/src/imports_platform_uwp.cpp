@@ -63,23 +63,21 @@ std::string describe(Platform::Exception ^e) {
     return narrow(e->Message) + hr;
 }
 
-// How many of the game's folders does `f` hold directly?
+// How many level archives (ACT1.POD ... ACT5.POD) does `f` hold directly? Three or more is an install.
 int game_dirs_in(StorageFolder ^f) {
     int n = 0;
-    auto subs = await(f->GetFoldersAsync());
-    for (StorageFolder ^s : subs) {
-        const std::wstring name = lower_w(s->Name->Data());
-        for (const FileCheck &c : game_file_checks())
-            if (name == lower_w(widen(c.dir))) { ++n; break; }
+    for (StorageFile ^file : await(f->GetFilesAsync())) {
+        const std::wstring name = lower_w(file->Name->Data());
+        if (name.size() == 8 && name.compare(0, 3, L"act") == 0 && name.compare(4, 4, L".pod") == 0) ++n;
     }
     return n;
 }
 
 // The picked folder itself, or the best candidate one or two levels down.
 StorageFolder ^find_root(StorageFolder ^picked) {
-    if (game_dirs_in(picked) >= 2) return picked;
+    if (game_dirs_in(picked) >= 3) return picked;
     StorageFolder ^best = nullptr;
-    int best_n = 1;
+    int best_n = 2;
     for (StorageFolder ^a : await(picked->GetFoldersAsync())) {
         int n = game_dirs_in(a);
         if (n > best_n) { best_n = n; best = a; }
@@ -101,6 +99,7 @@ void enumerate(StorageFolder ^f, std::vector<std::wstring> &rel, std::vector<Ent
     if (p.cancel) return;
     for (StorageFile ^file : await(f->GetFilesAsync())) {
         if (p.cancel) return;
+        if (!worth_copying(narrow(file->Name))) continue;
         const uint64_t size = await(file->GetBasicPropertiesAsync())->Size;
         out.push_back({file, rel, size});
     }
@@ -201,8 +200,8 @@ void add_platform_providers(std::vector<ImportProvider> &out) {
                 }
                 StorageFolder ^root = find_root(picked);
                 if (root == nullptr) {
-                    progress.set_error("That folder does not look like a Nocturne install (expected folders such as art, "
-                                       "models and world). Pick the folder that contains them.");
+                    progress.set_error("That folder does not look like a Nocturne install (expected ACT1.POD, ACT2.POD and the "
+                                       "other .POD files). Pick the folder that contains them.");
                     return CopyOutcome::Failed;
                 }
                 return copy_storage_folder(root, progress);
@@ -245,7 +244,7 @@ void add_platform_providers(std::vector<ImportProvider> &out) {
                     StorageFolder ^root = find_root(drive);
                     if (root != nullptr) return copy_storage_folder(root, progress);
                 }
-                progress.set_error("A drive is attached, but no Nocturne folder (art, models, world...) was found on it. "
+                progress.set_error("A drive is attached, but no Nocturne folder (the one holding ACT1.POD and the other .POD files) was found on it. "
                                    "Only file types the app has declared can be seen on removable storage.");
                 return CopyOutcome::Failed;
             } catch (Platform::Exception ^e) {

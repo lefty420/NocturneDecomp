@@ -488,7 +488,7 @@ void App::draw_files() {
         const CheckState st = r ? r->state : CheckState::OptionalMissing;
         status_icon(left.x + 70, ry + 34, scanned_once_ ? st : CheckState::OptionalMissing);
         g_.text(left.x + 112, ry + 6, checks[i].label, 30, kText);
-        std::string detail = std::string(checks[i].dir) + "/" + (checks[i].required ? "" : "  (optional)");
+        std::string detail = (checks[i].dir[0] ? std::string(checks[i].dir) + "/" : std::string(checks[i].pattern)) + (checks[i].required ? "" : "  (optional)");
         g_.text(left.x + 112, ry + 44, detail, 21, kFaint);
         std::string right_txt;
         Color rc = kMuted;

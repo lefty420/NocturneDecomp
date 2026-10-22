@@ -12,13 +12,16 @@ namespace nl {
 
 namespace {
 
+// The real layout of a Nocturne install, checked against a retail disc copy: a flat folder of .POD
+// archives (ACT1.POD ... ACT5.POD, the matching ACTnSND.pod, hero/enemy/English/music/... .pod) plus
+// System, Support and video folders. An empty dir means the install folder itself, not searched below it.
+// `counts` is false for checks that look at files another check already counts.
 const std::vector<FileCheck> kChecks = {
-    {"Artwork and textures", "art", "*.raw", 1, true},
-    {"3D models", "models", "*", 1, true},
-    {"Levels and missions", "world", "*.msn", 1, true},
-    {"Game data", "data", "*", 1, true},
-    {"Backdrops", "backdrop", "*.pvs", 1, true},
-    {"Intro movie", "video", "*.avi", 1, false},
+    {"Level archives (ACT1-5)", "", "ACT?.POD", 5, true, false},
+    {"Sound archives", "", "ACT?SND.pod", 5, true, false},
+    {"Game archives", "", "*.pod", 30, true, true},
+    {"System folder", "System", "*", 1, false, true},
+    {"Movies", "video", "*", 1, false, true},
 };
 
 std::string lower(std::string s) {
@@ -52,6 +55,15 @@ fs::path child_ci(const fs::path &dir, const std::string &name) {
 
 }  // namespace
 
+bool worth_copying(const std::string &filename) {
+    const std::string n = lower(filename);
+    for (const char *ext : {".exe", ".dll", ".log"}) {
+        const std::string e(ext);
+        if (n.size() >= e.size() && n.compare(n.size() - e.size(), e.size(), e) == 0) return false;
+    }
+    return true;
+}
+
 const std::vector<FileCheck> &game_file_checks() { return kChecks; }
 
 ScanResult scan_game_files(const fs::path &root) {
@@ -59,17 +71,24 @@ ScanResult scan_game_files(const fs::path &root) {
     for (const FileCheck &c : kChecks) {
         CheckResult r;
         r.check = &c;
-        const fs::path dir = child_ci(root, c.dir);
+        const bool at_root = c.dir[0] == '\0';
+        const fs::path dir = at_root ? root : child_ci(root, c.dir);
         if (!dir.empty()) {
             std::error_code ec;
-            for (fs::recursive_directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end;
-                 !ec && it != end; it.increment(ec)) {
+            auto count = [&](const fs::directory_entry &e) {
                 std::error_code e2;
-                if (!it->is_regular_file(e2)) continue;
-                if (!wild(c.pattern, it->path().filename().string().c_str())) continue;
+                if (!e.is_regular_file(e2)) return;
+                if (!wild(c.pattern, e.path().filename().string().c_str())) return;
                 r.files++;
-                const auto sz = it->file_size(e2);
+                const auto sz = e.file_size(e2);
                 if (!e2) r.bytes += sz;
+            };
+            if (at_root) {
+                for (fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end;
+                     !ec && it != end; it.increment(ec)) count(*it);
+            } else {
+                for (fs::recursive_directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end;
+                     !ec && it != end; it.increment(ec)) count(*it);
             }
         }
         if (r.files >= c.min_count) {
@@ -80,8 +99,10 @@ ScanResult scan_game_files(const fs::path &root) {
         } else {
             r.state = CheckState::OptionalMissing;
         }
-        out.total_files += r.files;
-        out.total_bytes += r.bytes;
+        if (c.counts) {
+            out.total_files += r.files;
+            out.total_bytes += r.bytes;
+        }
         out.items.push_back(r);
     }
     out.ready = out.missing_required == 0;
@@ -90,13 +111,13 @@ ScanResult scan_game_files(const fs::path &root) {
 
 namespace {
 
-// How many of the game's folders does `dir` hold?
+// How many of the level archives (ACT1.POD ...) does `dir` hold directly? Three or more is an install.
 int game_dirs_in(const fs::path &dir) {
     int n = 0;
-    for (const FileCheck &c : kChecks) {
-        std::error_code ec;
-        const fs::path p = child_ci(dir, c.dir);
-        if (!p.empty() && fs::is_directory(p, ec)) n++;
+    std::error_code ec;
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code e2;
+        if (it->is_regular_file(e2) && wild("ACT?.POD", it->path().filename().string().c_str())) n++;
     }
     return n;
 }
@@ -106,10 +127,10 @@ int game_dirs_in(const fs::path &dir) {
 fs::path find_game_root(const fs::path &picked) {
     std::error_code ec;
     if (!fs::is_directory(picked, ec)) return {};
-    if (game_dirs_in(picked) >= 2) return picked;
+    if (game_dirs_in(picked) >= 3) return picked;
     // One or two levels down, taking the candidate with the most matches.
     fs::path best;
-    int best_n = 1;
+    int best_n = 2;
     for (fs::directory_iterator a(picked, ec), end; !ec && a != end; a.increment(ec)) {
         std::error_code e2;
         if (!a->is_directory(e2)) continue;
@@ -136,6 +157,7 @@ CopyOutcome copy_tree(const fs::path &src, const fs::path &dst, CopyProgress &p)
         if (p.cancel) return CopyOutcome::Cancelled;
         std::error_code e2;
         if (!it->is_regular_file(e2)) continue;
+        if (!worth_copying(it->path().filename().string())) continue;
         const uint64_t sz = it->file_size(e2);
         items.push_back({it->path(), dst / fs::relative(it->path(), src, e2), e2 ? 0 : sz});
         total += e2 ? 0 : sz;

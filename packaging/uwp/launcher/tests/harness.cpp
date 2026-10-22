@@ -30,11 +30,14 @@ static void touch(const fs::path &p, size_t bytes) {
 }
 
 static void make_game(const fs::path &root) {
-    for (int i = 0; i < 40; ++i) touch(root / "ART" / ("img" + std::to_string(i) + ".RAW"), 20000);
-    for (int i = 0; i < 25; ++i) touch(root / "models" / ("m" + std::to_string(i) + ".bin"), 30000);
-    for (int i = 0; i < 9; ++i) touch(root / "World" / ("lvl" + std::to_string(i) + ".msn"), 5000);
-    for (int i = 0; i < 12; ++i) touch(root / "data" / ("d" + std::to_string(i) + ".dat"), 8000);
-    for (int i = 0; i < 6; ++i) touch(root / "backdrop" / ("b" + std::to_string(i) + ".pvs"), 4000);
+    // The real layout: a flat folder of .POD archives plus System / video folders and installer leftovers.
+    for (int i = 1; i <= 5; ++i) touch(root / ("ACT" + std::to_string(i) + ".POD"), 50000);
+    for (int i = 1; i <= 5; ++i) touch(root / ("ACT" + std::to_string(i) + "SND.pod"), 30000);
+    for (int i = 0; i < 30; ++i) touch(root / ("misc" + std::to_string(i) + ".pod"), 8000);
+    for (int i = 0; i < 3; ++i) touch(root / "System" / ("s" + std::to_string(i) + ".ini"), 500);
+    touch(root / "video" / "intro.avi", 20000);
+    touch(root / "nocturne.exe", 1000);   // not copied
+    touch(root / "tri3dfx.dll", 1000);    // not copied
 }
 
 struct Shot {
@@ -78,7 +81,7 @@ int main(int argc, char **argv) {
         App app(gfx, data, {});
         app.debug_wait_scan();
         EXPECT(!app.scan_result().ready);
-        EXPECT(app.scan_result().missing_required == 5);
+        EXPECT(app.scan_result().missing_required == 3);
         shot.save(app, "01_play_missing");
         app.handle(Input::Accept);          // "Add game files" jumps to the Files tab
         shot.save(app, "02_files_missing");
@@ -158,9 +161,10 @@ int main(int argc, char **argv) {
         app.handle(Input::Accept);               // close -> rescans
         app.debug_wait_scan();
         EXPECT(app.scan_result().ready);
-        EXPECT(app.scan_result().total_files == 40 + 25 + 9 + 12 + 6 + 1);
-        EXPECT(fs::exists(data / "ART" / "img0.RAW"));
-        EXPECT(!fs::exists(data / "ART" / "img0.RAW.part"));
+        EXPECT(app.scan_result().total_files == 40 + 3 + 2);
+        EXPECT(fs::exists(data / "ACT1.POD"));
+        EXPECT(!fs::exists(data / "ACT1.POD.part"));
+        EXPECT(!fs::exists(data / "nocturne.exe"));
         shot.save(app, "08_files_ready");
         app.debug_select_tab(0);
         shot.save(app, "09_play_ready");
