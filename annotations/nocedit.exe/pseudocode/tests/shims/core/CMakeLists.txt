@@ -5,4 +5,6 @@ nocturne_test_suite(shims_core
         shims/core/data_root.cpp
         shims/core/file_search.cpp
         shims/core/launcher_settings.cpp
+        # Where each root's copy of the directory is.
+        shims/watcom/path.cpp
 )

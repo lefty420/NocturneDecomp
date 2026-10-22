@@ -108,7 +108,8 @@ int debug_mode() {
 // #version 150 core: the earliest version with `in`/`out` and a declared
 // fragment output, which is what a core profile requires. It compiles in a
 // compatibility context too, so the renderer does not have to wait for the
-// context to be narrowed.
+// context to be narrowed. `#version 300 es` under NOCTURNE_GLES (gl/gl_api.h),
+// which the same source is written to compile as.
 //
 // Position arrives premultiplied by w so the perspective divide reproduces the
 // engine's own projection while keeping texture coordinates perspective

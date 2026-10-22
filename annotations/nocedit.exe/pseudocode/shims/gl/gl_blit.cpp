@@ -27,7 +27,8 @@ GLint  g_attr_pos = -1;
 GLint  g_attr_uv  = -1;
 
 // #version 150 core: the earliest version with `in`/`out` and a declared
-// fragment output, which is what a core profile accepts.
+// fragment output, which is what a core profile accepts. `#version 300 es`
+// under NOCTURNE_GLES (gl/gl_api.h).
 //
 // The quad's positions are already in clip space, so there is no projection to
 // apply. A unit square under glOrtho(0, 1, 1, 0, -1, 1) maps onto NDC as

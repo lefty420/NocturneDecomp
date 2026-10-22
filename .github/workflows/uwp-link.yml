@@ -11,6 +11,7 @@ on:
     paths:
       - '.github/workflows/uwp-link.yml'
       - 'cmake/uwp_libs.cmake'
+      - 'cmake/platforms/uwp.cmake'
       - 'cmake/toolchains/uwp-x64.cmake'
       - 'CMakeLists.txt'
       - 'packaging/uwp/launcher/**'

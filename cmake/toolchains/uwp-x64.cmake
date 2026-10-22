@@ -34,3 +34,5 @@ set(CMAKE_CXX_STANDARD_LIBRARIES_INIT "WindowsApp.lib runtimeobject.lib")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "/APPCONTAINER /SUBSYSTEM:WINDOWS /MANIFEST:NO /ERRORLIMIT:0")
 
 set(NOCTURNE_UWP ON CACHE BOOL "Building for UWP" FORCE)
+# Pick cmake/platforms/uwp.cmake instead of the desktop Windows platform file.
+set(NOCTURNE_PLATFORM uwp CACHE STRING "Platform file under cmake/platforms/" FORCE)

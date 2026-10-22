@@ -54,9 +54,9 @@ BUILD_DIR="${SCRIPT_DIR}/build/${PRESET}"
 CONFIGURE_ARGS=()
 
 if [[ "${VANILLA}" == "1" && "${PRESET}" != *vanilla* ]]; then
-    twin="${PRESET%-x86_64}-vanilla-x86_64"
-    if [[ "${PRESET}" == *-x86_64 ]] &&
-       grep -q "\"name\": \"${twin}\"" "${SCRIPT_DIR}/CMakePresets.json"; then
+    # The twin puts -vanilla before the architecture suffix.
+    twin="${PRESET%-*}-vanilla-${PRESET##*-}"
+    if grep -q "\"name\": \"${twin}\"" "${SCRIPT_DIR}/CMakePresets.json"; then
         PRESET="${twin}"
         BUILD_DIR="${SCRIPT_DIR}/build/${PRESET}"
     else
@@ -86,7 +86,7 @@ fi
 # empty build dir.
 if [[ ! -f "${BUILD_DIR}/CMakeCache.txt" ]]; then
     echo "build.sh: configuring preset '${PRESET}' (first run)"
-    cmake --preset "${PRESET}" "${CONFIGURE_ARGS[@]}" || exit $?
+    cmake --preset "${PRESET}" ${CONFIGURE_ARGS[@]+"${CONFIGURE_ARGS[@]}"} || exit $?
 fi
 
 # Force a re-glob so newly added .keep.cpp / .keep.c files end up in the ninja
