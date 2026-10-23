@@ -38,6 +38,10 @@ static LONG CALLBACK boot_crash_handler(PEXCEPTION_POINTERS ep) {
 
 // AddVectoredExceptionHandler is not declared for UWP, so look it up at run time.
 extern "C" void nocturne_boot_init(void) {
+    // On Xbox the B button is the system "back" action, and an app that does not say it handles it is
+    // closed by the console. Tell SDL to claim it (it then arrives as an ordinary key event). Must be
+    // set before SDL creates the window.
+    SDL_SetHint("SDL_WINRT_HANDLE_BACK_BUTTON", "1");
     // The game reports problems on stderr, which a UWP app has nowhere to show: keep it in a file.
     const std::string errpath = nocturne_data_path("stderr.log");
     if (std::freopen(errpath.c_str(), "a", stderr)) std::setvbuf(stderr, nullptr, _IONBF, 0);
