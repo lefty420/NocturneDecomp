@@ -297,6 +297,15 @@ int _chmod(const char* path, int mode) {
 
 #endif
 
+#if defined(_MSC_VER)
+// The game's startup calls _chmod("stderr.txt", ...) on a file that sits under the data root, which
+// the UCRT's own _chmod would look for in the working directory and report as missing. Resolve first.
+#undef _chmod
+int nocturne_watcom_chmod(const char* path, int mode) {
+    return ::_chmod(watcom_resolve_fs_path(path).c_str(), mode);
+}
+#endif
+
 // =============================================================================
 // Heap Functions (malloc.h)
 // =============================================================================

@@ -322,6 +322,10 @@ extern void* _memset(void* dest, int value, size_t count);
 #define rand nocturne_watcom_rand
 #define srand nocturne_watcom_srand
 #define _mkdir nocturne_watcom_mkdir
+// The UCRT's _chmod takes a path relative to the working directory, but the game's files live under
+// the data root (watcom/path.h), so the shim resolves the path first.
+#define _chmod nocturne_watcom_chmod
+extern int nocturne_watcom_chmod(const char* path, int mode);
 #endif
 extern long tell(int fd);
 extern int chsize(int fd, long size);
