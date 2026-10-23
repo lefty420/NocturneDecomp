@@ -18,6 +18,7 @@ on:
       - 'packaging/uwp/AppxManifest.xml'
       - '.github/scripts/make_logos.py'
       - 'annotations/nocedit.exe/pseudocode/main/**'
+      - 'annotations/nocedit.exe/pseudocode/src/core/menu.cpp/**'
       - 'annotations/nocedit.exe/pseudocode/include/system/**'
       - 'annotations/nocedit.exe/pseudocode/shims/**'
 
