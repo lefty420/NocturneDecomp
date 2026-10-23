@@ -25,7 +25,7 @@ struct Repeater {
 }  // namespace
 
 LaunchResult run_launcher(SDL_Window *window, SDL_Renderer *renderer, const std::filesystem::path &fonts_dir,
-                          const std::filesystem::path &data_root) {
+                          const std::filesystem::path &data_root, bool auto_start) {
     Gfx gfx;
     if (!gfx.init(renderer, fonts_dir.string())) {
         std::fprintf(stderr, "launcher: could not load fonts from %s\n", fonts_dir.string().c_str());
@@ -34,6 +34,7 @@ LaunchResult run_launcher(SDL_Window *window, SDL_Renderer *renderer, const std:
     std::vector<ImportProvider> providers = make_portable_providers();
     add_platform_providers(providers);
     App app(gfx, data_root, std::move(providers));
+    app.set_auto_start(auto_start);
 
     SDL_GameController *pad = nullptr;
     auto open_first_pad = [&] {
@@ -72,6 +73,7 @@ LaunchResult run_launcher(SDL_Window *window, SDL_Renderer *renderer, const std:
                     }
                     break;
                 case SDL_CONTROLLERBUTTONDOWN:
+                    app.cancel_auto_start();
                     switch (e.cbutton.button) {
                         case SDL_CONTROLLER_BUTTON_A: app.handle(Input::Accept); break;
                         case SDL_CONTROLLER_BUTTON_B: app.handle(Input::Back); break;
@@ -81,6 +83,7 @@ LaunchResult run_launcher(SDL_Window *window, SDL_Renderer *renderer, const std:
                     }
                     break;
                 case SDL_KEYDOWN:
+                    app.cancel_auto_start();
                     if (e.key.repeat) break;
                     switch (e.key.keysym.sym) {
                         case SDLK_RETURN: case SDLK_SPACE: app.handle(Input::Accept); break;

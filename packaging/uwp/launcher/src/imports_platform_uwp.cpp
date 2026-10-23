@@ -317,3 +317,13 @@ extern "C" void nocturne_uwp_claim_back_button(void) {
     } catch (Platform::Exception ^) {
     }
 }
+
+// Asks the system to restart the app. Returns if the console refused (or does not support it); on success
+// the process is ended and started again by the system.
+extern "C" void nocturne_uwp_restart_app(void) {
+    try {
+        create_task(CoreApplication::RequestRestartAsync("")).get();
+    } catch (Platform::Exception ^) {
+    } catch (...) {
+    }
+}

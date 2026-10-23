@@ -40,6 +40,9 @@ public:
     void debug_set_focus(int f) { focus_ = f; }
     bool scanning() const { return scan_.valid(); }
     void debug_wait_scan();
+    // Start the game by itself, after a short countdown, once the files are found (until cancelled).
+    void set_auto_start(bool on) { auto_allowed_ = on; }
+    void cancel_auto_start() { auto_done_ = true; }
     const ScanResult &scan_result() const { return scan_result_; }
     bool importing() const { return job_ != nullptr; }
 
@@ -79,6 +82,7 @@ private:
     void draw_settings();
     void draw_about();
     void draw_story();
+    void draw_auto_start();
     void draw_cover(const Rect &panel_rect);
     SDL_Texture *load_cover();
     SDL_Texture *cover_ = nullptr;   // optional box art: cover.bmp in the data folder
@@ -116,6 +120,9 @@ private:
     std::future<ScanResult> scan_;
     ScanResult scan_result_;
     bool scanned_once_ = false;
+    bool auto_allowed_ = false;
+    bool auto_done_ = false;
+    float auto_timer_ = -1.0f;                 // seconds left before the game starts; <0 = not counting
     bool auto_probed_ = false;                 // the start-up drive check has been started
     // The start-up drive check runs on a detached thread: on a console the removable-storage call can
     // block indefinitely, and the launcher must still be able to close and start the game.

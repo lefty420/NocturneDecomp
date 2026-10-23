@@ -8,6 +8,7 @@
 #include <windows.h>
 
 #include <cstdio>
+#include <cstdlib>
 
 #include <filesystem>
 #include <string>
@@ -58,6 +59,20 @@ extern "C" void nocturne_boot_init(void) {
     nocturne_boot_log("note: no exception handler available");
 }
 
+extern "C" void nocturne_uwp_restart_app(void);   // imports_platform_uwp.cpp (C++/CX)
+
+// View + Menu + L3 in the game: the game owns the window and the graphics context, so the launcher cannot be
+// drawn over it. Leave a note, then restart the app (or just close it); the next start shows the launcher.
+extern "C" void nocturne_uwp_return_to_launcher(void) {
+    static bool once = false;
+    if (once) return;
+    once = true;
+    nocturne_boot_log("chord: returning to the launcher");
+    if (FILE *f = std::fopen(nocturne_data_path("show_launcher.flag").c_str(), "wb")) std::fclose(f);
+    nocturne_uwp_restart_app();   // returns only if the console refused the restart
+    std::exit(0);
+}
+
 extern "C" int nocturne_uwp_run_launcher(void) {
     nocturne_boot_log("launcher: SDL_Init");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) return 1;  // no launcher: just start the game
@@ -76,7 +91,17 @@ extern "C" int nocturne_uwp_run_launcher(void) {
     const char *base = SDL_GetBasePath();
     const std::filesystem::path fonts = std::filesystem::path(base ? base : "") / "fonts";
     if (base) SDL_free((void *)base);
-    const nl::LaunchResult res = nl::run_launcher(w, r, fonts, std::filesystem::path(nocturne_data_root()));
+    // A restart caused by the in-game chord goes straight to the launcher; a normal start may begin the
+    // game by itself once the files are found.
+    const std::string flag = nocturne_data_path("show_launcher.flag");
+    bool allow_auto_start = true;
+    if (FILE *f = std::fopen(flag.c_str(), "rb")) {
+        std::fclose(f);
+        std::remove(flag.c_str());
+        allow_auto_start = false;
+    }
+    const nl::LaunchResult res =
+        nl::run_launcher(w, r, fonts, std::filesystem::path(nocturne_data_root()), allow_auto_start);
     nocturne_boot_log("launcher: UI returned");
     SDL_DestroyRenderer(r);
     SDL_DestroyWindow(w);

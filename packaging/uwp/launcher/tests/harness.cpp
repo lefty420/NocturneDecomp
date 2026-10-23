@@ -229,6 +229,36 @@ int main(int argc, char **argv) {
         shot.save(app, "14_story_with_cover");
     }
 
+    // ---- Scenario 5: automatic start once the files are found ---------------------------
+    {
+        const fs::path data = tmp / "data";   // holds a complete install by now
+        App autoapp(gfx, data, {});
+        autoapp.set_auto_start(true);
+        autoapp.debug_wait_scan();
+        EXPECT(autoapp.scan_result().ready);
+        autoapp.update(0.05f);
+        EXPECT(autoapp.result() == Result::Running);        // counting down, not started yet
+        shot.save(autoapp, "15_auto_start_countdown");
+        for (int i = 0; i < 80; ++i) autoapp.update(0.05f);
+        EXPECT(autoapp.result() == Result::Play);
+
+        App stay(gfx, data, {});
+        stay.set_auto_start(true);
+        stay.debug_wait_scan();
+        stay.update(0.05f);
+        stay.cancel_auto_start();                           // any button
+        for (int i = 0; i < 80; ++i) stay.update(0.05f);
+        EXPECT(stay.result() == Result::Running);
+
+        const fs::path empty = tmp / "empty_data";
+        fs::create_directories(empty);
+        App missing(gfx, empty, {});
+        missing.set_auto_start(true);
+        missing.debug_wait_scan();
+        for (int i = 0; i < 80; ++i) missing.update(0.05f);
+        EXPECT(missing.result() == Result::Running);        // files missing: never starts by itself
+    }
+
     fs::remove_all(tmp);
     std::printf("%s (%d failure(s))\n", g_fail ? "FAILED" : "ok", g_fail);
     gfx.shutdown();

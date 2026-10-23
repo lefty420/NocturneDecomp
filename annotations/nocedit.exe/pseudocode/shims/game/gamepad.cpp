@@ -388,6 +388,10 @@ bool button_down(SDL_GameControllerButton button) {
 
 } // namespace
 
+#ifdef NOCTURNE_UWP_LAUNCHER
+extern "C" void nocturne_uwp_return_to_launcher(void);   // launcher_entry.cpp
+#endif
+
 extern "C" void nocturne_gamepad_pump(void) {
     nocturne_gamepad_init();
 
@@ -412,6 +416,14 @@ extern "C" void nocturne_gamepad_pump(void) {
     float trigger_l = 0.0f, trigger_r = 0.0f;
     nocturne_gamepad_axes(&move_x, &move_y, &look_x, &look_y,
                           &trigger_l, &trigger_r);
+
+#ifdef NOCTURNE_UWP_LAUNCHER
+    // View + Menu + left-stick click together: back to the launcher (settings, game files).
+    if (button_down(SDL_CONTROLLER_BUTTON_BACK) && button_down(SDL_CONTROLLER_BUTTON_START) &&
+        button_down(SDL_CONTROLLER_BUTTON_LEFTSTICK)) {
+        nocturne_uwp_return_to_launcher();
+    }
+#endif
 
     // Buttons, in SDL's order, straight onto their codes.
     for (int b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++) {

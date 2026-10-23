@@ -163,3 +163,9 @@ installs, that SDL's WinRT backend finds this ANGLE, the launcher's three import
 Deploy: Xbox in Dev Mode → Device Portal (`https://<console-ip>:11443`) → Add → choose the `.msix`
 (add the `.cer` if asked) → Start. Game files: use the launcher's Game files screen, or Device Portal
 → File explorer → LocalAppData → the app → LocalState.
+
+## Credits
+
+The decompilation this port is built on, [NocturneDecomp](https://github.com/NearlyTRex/NocturneDecomp),
+is the work of **NearlyTRex**. Nocturne is by Terminal Reality. This Xbox port is an unofficial community
+build; it contains none of the game's data except the box-art tile used as the app picture.
