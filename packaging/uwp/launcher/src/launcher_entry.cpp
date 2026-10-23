@@ -1,6 +1,7 @@
 // The one function the game's startup calls before it creates its own window: shows the
 // launcher (settings, game files) and reports whether the player chose Play.
 #include "launcher_main.h"
+#include "game_files.h"
 
 #include "core/data_root.h"
 
@@ -74,6 +75,26 @@ extern "C" void nocturne_uwp_return_to_launcher(void) {
 }
 
 extern "C" int nocturne_uwp_run_launcher(void) {
+    // After the player has pressed Play once with the game files in place, later starts go straight into
+    // the game. View + Menu + L3 in the game leaves show_launcher.flag and restarts the app, which brings the
+    // launcher back for that one start (and Play there turns the shortcut on again).
+    const std::string skip_flag = nocturne_data_path("skip_launcher.flag");
+    const std::string show_flag = nocturne_data_path("show_launcher.flag");
+    bool want_launcher = false;
+    if (FILE *f = std::fopen(show_flag.c_str(), "rb")) {
+        std::fclose(f);
+        std::remove(show_flag.c_str());
+        want_launcher = true;
+    }
+    if (!want_launcher) {
+        if (FILE *f = std::fopen(skip_flag.c_str(), "rb")) {
+            std::fclose(f);
+            if (nl::scan_game_files(nl::effective_data_dir(std::filesystem::path(nocturne_data_root()))).ready) {
+                nocturne_boot_log("launcher: skipped (game files ready, Play chosen before)");
+                return 1;
+            }
+        }
+    }
     nocturne_boot_log("launcher: SDL_Init");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) return 1;  // no launcher: just start the game
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) { std::string m = std::string("launcher: SDL_Init failed: ") + SDL_GetError(); nocturne_boot_log(m.c_str()); }
@@ -91,17 +112,10 @@ extern "C" int nocturne_uwp_run_launcher(void) {
     const char *base = SDL_GetBasePath();
     const std::filesystem::path fonts = std::filesystem::path(base ? base : "") / "fonts";
     if (base) SDL_free((void *)base);
-    // A restart caused by the in-game chord goes straight to the launcher; a normal start may begin the
-    // game by itself once the files are found.
-    const std::string flag = nocturne_data_path("show_launcher.flag");
-    bool allow_auto_start = true;
-    if (FILE *f = std::fopen(flag.c_str(), "rb")) {
-        std::fclose(f);
-        std::remove(flag.c_str());
-        allow_auto_start = false;
+    const nl::LaunchResult res = nl::run_launcher(w, r, fonts, std::filesystem::path(nocturne_data_root()));
+    if (res == nl::LaunchResult::Play) {
+        if (FILE *f = std::fopen(skip_flag.c_str(), "wb")) std::fclose(f);
     }
-    const nl::LaunchResult res =
-        nl::run_launcher(w, r, fonts, std::filesystem::path(nocturne_data_root()), allow_auto_start);
     nocturne_boot_log("launcher: UI returned");
     SDL_DestroyRenderer(r);
     SDL_DestroyWindow(w);

@@ -275,15 +275,6 @@ void App::update(float dt) {
     time_ += dt;
     if (toast_ > 0) toast_ -= dt;
     finish_scan_if_ready();
-    if (auto_allowed_ && !auto_done_ && scanned_once_ && modal_ == Modal::None) {
-        if (!scan_result_.ready) {
-            auto_done_ = true;                         // files missing: stay and let the player add them
-        } else {
-            if (auto_timer_ < 0) auto_timer_ = 3.0f;
-            auto_timer_ -= dt;
-            if (auto_timer_ <= 0) { auto_done_ = true; result_ = Result::Play; }
-        }
-    }
     tab_x_.step(dt);
     tab_w_.step(dt);
     focus_y_.step(dt);
@@ -803,16 +794,6 @@ void App::draw_modal() {
     if (fin) button({r.right() - 48 - 240, r.bottom() - 48 - 76, 240, 76}, "Close", true);
 }
 
-void App::draw_auto_start() {
-    if (!(auto_allowed_ && !auto_done_ && auto_timer_ > 0)) return;
-    const int n = static_cast<int>(auto_timer_) + 1;
-    const Rect bar{kDesignW * 0.5f - 460, 972, 920, 64};
-    g_.rrect(bar, 32, kPanel2.alpha(0.96f));
-    g_.rrect_outline(bar, 32, 2.0f, kAccent);
-    g_.text_center(bar.cx(), bar.y + 14, "Starting Nocturne in " + std::to_string(n) + "   -   press any button to stay here",
-                   26, kText, FontFace::Bold);
-}
-
 void App::draw_toast() {
     if (toast_ <= 0) return;
     const float a = clampf(toast_ / 0.4f, 0, 1);
@@ -835,7 +816,6 @@ void App::draw() {
         default: draw_about(); break;
     }
     draw_footer();
-    draw_auto_start();
     draw_toast();
     draw_modal();
 }
