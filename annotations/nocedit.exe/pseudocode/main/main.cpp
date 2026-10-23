@@ -8,6 +8,8 @@
 // against a modern C/C++ runtime.
 //
 // Responsibilities:
+//   0. On Windows, catch an unhandled fault and leave a crash report
+//      (core/crash_report.h) rather than vanishing.
 //   1. Choose the data and user directories (core/path_roots.h), then
 //      initialize the cross-platform Win32 shim function pointers.
 //   2. Synthesize the HINSTANCE/cmdline arguments the decompiled winMain
@@ -18,6 +20,7 @@
 #include "nocturne.h"
 #include "win32/shim_init.h"
 #include "core/path_roots.h"
+#include "core/crash_report.h"
 
 #if defined(_WIN32)
 #include <winapifamily.h>
@@ -74,6 +77,7 @@ int main(int argc, char** argv)
         return 0;
     }
 
+    nocturne_install_crash_handler(nocturne_version_line());
     nocturne_init_path_roots(argc, argv);
 #ifdef NOCTURNE_UWP_LAUNCHER
     // Launcher first: settings and adding the game files. Quit there means quit the app.
