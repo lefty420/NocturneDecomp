@@ -17,6 +17,7 @@
 #include "gl/gl_api.h"
 #include "gl/gl_blit.h"
 #include "gl/gl_pixels.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,6 +25,40 @@
 extern SDL_Window *g_sdlWindow;
 
 namespace {
+
+// The size of the surface the context actually draws to. SDL_GL_GetDrawableSize reports the window's
+// cached size, and on UWP the game's own SDL_SetWindowSize(640, 480) leaves that cache at 640x480 while
+// the CoreWindow stays full screen, so the picture came out as a small square in one corner of the TV.
+// Where EGL is in use, ask EGL for the real surface size instead.
+void real_drawable_size(SDL_Window *window, int *w, int *h) {
+    SDL_GL_GetDrawableSize(window, w, h);
+#if defined(NOCTURNE_UWP_LAUNCHER)
+    typedef void *(*GetCurrent)(int);
+    typedef void *(*GetDisplay)(void);
+    typedef unsigned (*QuerySurface)(void *, void *, int, int *);
+    static GetCurrent get_surface = (GetCurrent)SDL_GL_GetProcAddress("eglGetCurrentSurface");
+    static GetDisplay get_display = (GetDisplay)SDL_GL_GetProcAddress("eglGetCurrentDisplay");
+    static QuerySurface query = (QuerySurface)SDL_GL_GetProcAddress("eglQuerySurface");
+    if (get_surface && get_display && query) {
+        const int EGL_DRAW = 0x3059, EGL_HEIGHT = 0x3056, EGL_WIDTH = 0x3057;
+        void *surface = get_surface(EGL_DRAW);
+        void *display = get_display();
+        int ew = 0, eh = 0;
+        if (surface && display && query(display, surface, EGL_WIDTH, &ew) && query(display, surface, EGL_HEIGHT, &eh) &&
+            ew > 0 && eh > 0) {
+            static int logged_w = 0, logged_h = 0;
+            if (ew != logged_w || eh != logged_h) {
+                fprintf(stderr, "nocturne: EGL surface %dx%d (SDL reported %dx%d)\n", ew, eh, *w, *h);
+                logged_w = ew;
+                logged_h = eh;
+            }
+            *w = ew;
+            *h = eh;
+        }
+    }
+#endif
+}
+
 
 struct GLPresentState {
     SDL_Window   *window        = nullptr;
@@ -371,7 +406,7 @@ void present_to_window(GLuint texture, int fallback_w, int fallback_h, bool flip
     }
 
     int drawable_w = 0, drawable_h = 0;
-    SDL_GL_GetDrawableSize(g_gl.window, &drawable_w, &drawable_h);
+    real_drawable_size(g_gl.window, &drawable_w, &drawable_h);
 
     const int logical_w = (g_gl.logical_width  > 0) ? g_gl.logical_width  : fallback_w;
     const int logical_h = (g_gl.logical_height > 0) ? g_gl.logical_height : fallback_h;
@@ -508,7 +543,7 @@ extern "C" int nocturne_gl_read_front(unsigned char **out_rgb, int *out_width, i
     if (!g_gl.active || out_rgb == nullptr) return -1;
 
     int drawable_w = 0, drawable_h = 0;
-    SDL_GL_GetDrawableSize(g_gl.window, &drawable_w, &drawable_h);
+    real_drawable_size(g_gl.window, &drawable_w, &drawable_h);
     if (drawable_w <= 0 || drawable_h <= 0) return -1;
 
     const size_t row_bytes = (size_t)drawable_w * 3;
@@ -547,7 +582,7 @@ extern "C" void nocturne_gl_window_to_logical(int window_x, int window_y,
 
     int win_w = 0, win_h = 0, drawable_w = 0, drawable_h = 0;
     SDL_GetWindowSize(g_gl.window, &win_w, &win_h);
-    SDL_GL_GetDrawableSize(g_gl.window, &drawable_w, &drawable_h);
+    real_drawable_size(g_gl.window, &drawable_w, &drawable_h);
     if (win_w <= 0 || win_h <= 0 || drawable_w <= 0 || drawable_h <= 0) return;
 
     const int logical_w = (g_gl.logical_width  > 0) ? g_gl.logical_width  : drawable_w;
