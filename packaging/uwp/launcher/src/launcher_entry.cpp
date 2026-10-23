@@ -14,6 +14,8 @@
 
 // Breadcrumbs and a crash note in <LocalState>\startup.log: a UWP app that dies at start-up shows
 // nothing. Read it through Device Portal (File explorer > LocalAppData > the app > LocalState).
+extern "C" void nocturne_uwp_claim_back_button(void);   // imports_platform_uwp.cpp (C++/CX)
+
 extern "C" void nocturne_boot_log(const char *line) {
     const std::string path = nocturne_data_path("startup.log");
     FILE *f = std::fopen(path.c_str(), "a");
@@ -42,6 +44,7 @@ extern "C" void nocturne_boot_init(void) {
     // closed by the console. Tell SDL to claim it (it then arrives as an ordinary key event). Must be
     // set before SDL creates the window.
     SDL_SetHint("SDL_WINRT_HANDLE_BACK_BUTTON", "1");
+    nocturne_uwp_claim_back_button();
     // The game reports problems on stderr, which a UWP app has nowhere to show: keep it in a file.
     const std::string errpath = nocturne_data_path("stderr.log");
     if (std::freopen(errpath.c_str(), "a", stderr)) std::setvbuf(stderr, nullptr, _IONBF, 0);

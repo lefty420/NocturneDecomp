@@ -299,3 +299,21 @@ void add_platform_providers(std::vector<ImportProvider> &out) {
 }
 
 }  // namespace nl
+
+// On Xbox the B button is the system "back" action; an app that leaves it unhandled is closed by the
+// console. SDL only registers a handler when it is built for Windows 10 and this one is not, so claim
+// it ourselves. The handler has to be added from the UI thread, which is not the one the game runs on.
+extern "C" void nocturne_uwp_claim_back_button(void) {
+    try {
+        CoreApplication::MainView->Dispatcher->RunAsync(
+            CoreDispatcherPriority::Normal, ref new DispatchedHandler([]() {
+                try {
+                    SystemNavigationManager::GetForCurrentView()->BackRequested +=
+                        ref new EventHandler<BackRequestedEventArgs ^>(
+                            [](Platform::Object ^, BackRequestedEventArgs ^ args) { args->Handled = true; });
+                } catch (Platform::Exception ^) {
+                }
+            }));
+    } catch (Platform::Exception ^) {
+    }
+}
