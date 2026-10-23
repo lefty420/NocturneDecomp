@@ -11,6 +11,10 @@
 
 namespace nl {
 
+// Where the game's files are: the folder named in <root>/data_dir.txt when the player chose to use the
+// files on a USB drive in place and that folder is reachable, otherwise <root> itself.
+std::filesystem::path effective_data_dir(const std::filesystem::path &root);
+
 // Installer programs, DLLs and logs from the original install are not needed and are not copied.
 bool worth_copying(const std::string &filename);
 

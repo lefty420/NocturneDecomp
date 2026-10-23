@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cwctype>
+#include <fstream>
 #include <future>
 
 using namespace Platform;
@@ -207,6 +208,47 @@ void add_platform_providers(std::vector<ImportProvider> &out) {
                 return copy_storage_folder(root, progress);
             } catch (Platform::Exception ^e) {
                 progress.set_error("Copy failed: " + describe(e));
+                return CopyOutcome::Failed;
+            }
+        };
+        out.push_back(std::move(p));
+    }
+    {
+        // Experimental: read the game straight from the drive, so nothing is copied and nothing is lost
+        // when the app is uninstalled. Needs the console to let the app open the drive by path.
+        ImportProvider p;
+        p.title = "Use the USB drive directly (experimental)";
+        p.subtitle = "Keeps the files on the drive: nothing is copied, nothing is lost if you reinstall";
+        p.in_place = true;
+        p.unavailable_reason = [] { return std::string(); };
+        p.run = [](CopyProgress &progress, const std::filesystem::path &data_root) -> CopyOutcome {
+            RoInitialize(RO_INIT_MULTITHREADED);
+            try {
+                progress.set_current("Looking for drives...");
+                auto drives = await(KnownFolders::RemovableDevices->GetFoldersAsync());
+                for (StorageFolder ^drive : drives) {
+                    StorageFolder ^root = find_root(drive);
+                    if (root == nullptr) continue;
+                    const std::string path = narrow(root->Path);
+                    std::error_code ec;
+                    if (path.empty() || !std::filesystem::is_directory(std::filesystem::path(path), ec)) {
+                        progress.set_error("The console would not let the app open the drive by path, so the files can't be "
+                                           "used in place. Use \"Import from a USB drive\" instead.");
+                        return CopyOutcome::Failed;
+                    }
+                    std::ofstream out(data_root / "data_dir.txt", std::ios::trunc);
+                    out << path << "\n";
+                    if (!out) {
+                        progress.set_error("Could not remember the drive's location.");
+                        return CopyOutcome::Failed;
+                    }
+                    progress.set_current(path);
+                    return CopyOutcome::Done;
+                }
+                progress.set_error("No drive with a Nocturne folder (the one holding ACT1.POD and the other .POD files) was found.");
+                return CopyOutcome::Failed;
+            } catch (Platform::Exception ^e) {
+                progress.set_error("Could not read the drive: " + describe(e));
                 return CopyOutcome::Failed;
             }
         };

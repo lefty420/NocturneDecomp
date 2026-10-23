@@ -59,7 +59,22 @@ void nocturne_init_path_roots(int argc, char **argv) {
     // logs all live in the app's local folder, so it is both the data and the user directory.
     std::string uwp_root = nocturne_data_root();
     while (uwp_root.size() > 1 && uwp_root.back() == '/') uwp_root.pop_back();
-    const char *default_data = uwp_root.empty() ? nullptr : uwp_root.c_str();
+    // The player may have chosen to use the game files on a USB drive in place (launcher: data_dir.txt).
+    std::string uwp_data = uwp_root;
+    {
+        FILE *f = fopen((uwp_root + "/data_dir.txt").c_str(), "rb");
+        if (f != nullptr) {
+            char line[1024] = {0};
+            if (fgets(line, sizeof line, f) != nullptr) {
+                std::string dir = line;
+                while (!dir.empty() && (dir.back() == '\n' || dir.back() == '\r' || dir.back() == ' ')) dir.pop_back();
+                std::error_code ec;
+                if (!dir.empty() && std::filesystem::is_directory(std::filesystem::path(dir), ec)) uwp_data = dir;
+            }
+            fclose(f);
+        }
+    }
+    const char *default_data = uwp_data.empty() ? nullptr : uwp_data.c_str();
 #elif defined(NOCTURNE_DEFAULT_DATA_DIR)
     const char *default_data = NOCTURNE_DEFAULT_DATA_DIR;
 #else
@@ -67,7 +82,7 @@ void nocturne_init_path_roots(int argc, char **argv) {
 #endif
 
 #if defined(NOCTURNE_UWP_LAUNCHER)
-    const char *default_user = default_data;   // same folder; the equal roots collapse below
+    const char *default_user = uwp_root.empty() ? nullptr : uwp_root.c_str();   // saves and logs stay in the app
 #elif defined(NOCTURNE_USER_DIR_FROM_SDL)
     // SDL_GetPrefPath creates the directory and keeps no hold on the string.
     char *pref = SDL_GetPrefPath("NocturneDecomp", "Nocturne");

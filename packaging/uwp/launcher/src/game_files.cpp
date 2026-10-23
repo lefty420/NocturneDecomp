@@ -66,6 +66,17 @@ bool worth_copying(const std::string &filename) {
 
 const std::vector<FileCheck> &game_file_checks() { return kChecks; }
 
+fs::path effective_data_dir(const fs::path &root) {
+    std::ifstream in(root / "data_dir.txt");
+    std::string line;
+    if (in && std::getline(in, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) line.pop_back();
+        std::error_code ec;
+        if (!line.empty() && fs::is_directory(fs::path(line), ec)) return fs::path(line);
+    }
+    return root;
+}
+
 ScanResult scan_game_files(const fs::path &root) {
     ScanResult out;
     for (const FileCheck &c : kChecks) {

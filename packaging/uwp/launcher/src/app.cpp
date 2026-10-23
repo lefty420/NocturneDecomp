@@ -72,7 +72,7 @@ App::~App() {
 void App::start_scan() {
     if (scan_.valid()) return;
     const fs::path root = root_;
-    scan_ = std::async(std::launch::async, [root] { return scan_game_files(root); });
+    scan_ = std::async(std::launch::async, [root] { return scan_game_files(effective_data_dir(root)); });
 }
 
 void App::finish_scan_if_ready() {
@@ -136,8 +136,14 @@ void App::start_import(size_t idx) {
     Job *j = job_.get();
     const fs::path root = root_;
     auto run = providers_[idx].run;
-    j->thread = std::thread([j, run, root] {
+    const bool in_place = providers_[idx].in_place;
+    j->thread = std::thread([j, run, root, in_place] {
         j->outcome = run(j->progress, root);
+        // Copying files in means the app's own copy is the one to use from now on.
+        if (j->outcome == CopyOutcome::Done && !in_place) {
+            std::error_code ec;
+            fs::remove(root / "data_dir.txt", ec);
+        }
         j->finished = true;
     });
     modal_ = Modal::Import;

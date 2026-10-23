@@ -16,6 +16,7 @@ namespace nl {
 struct ImportProvider {
     std::string title;      // "Import from a USB drive"
     std::string subtitle;   // one line under it
+    bool in_place = false;  // leaves the files where they are (writes data_dir.txt) instead of copying them
     // Empty when the provider can run; otherwise a short reason to show the player.
     std::function<std::string()> unavailable_reason;
     // Optional. Runs on a worker thread at start-up when the game files are missing; returns a short
