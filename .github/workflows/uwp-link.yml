@@ -17,6 +17,7 @@ on:
       - 'packaging/uwp/launcher/**'
       - 'packaging/uwp/AppxManifest.xml'
       - '.github/scripts/make_logos.py'
+      - 'packaging/uwp/assets/**'
       - 'annotations/nocedit.exe/pseudocode/main/**'
       - 'annotations/nocedit.exe/pseudocode/src/core/menu.cpp/**'
       - 'annotations/nocedit.exe/pseudocode/include/system/**'
@@ -146,7 +147,7 @@ jobs:
           Copy-Item packaging\uwp\launcher\assets\fonts\*.ttf "$P\fonts"
           Copy-Item packaging\uwp\launcher\assets\cover.bmp $P
           python -m pip install -q pillow 2>&1 | Out-Null
-          python .github\scripts\make_logos.py "$P\Assets"
+          python .github\scripts\make_logos.py "$P\Assets" packaging\uwp\assets\icon.png
           # What the exe and each bundled DLL import: anything that is not a Windows/UWP system DLL or
           # shipped in the package makes the app die silently at launch.
           $dep = @()
