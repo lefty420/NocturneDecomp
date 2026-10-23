@@ -112,9 +112,13 @@ LAB_005131d5:
       iVar10 = 99;
     }
     iVar8 = (*g_CKeysPtr->vtable->getAndClearKeyState)(g_CKeysPtr,DIK_ESCAPE);
+#if !defined(NOCTURNE_UWP_LAUNCHER)
+    // On the Xbox build the pad's B button is Escape, and B backing out of the front page quit the
+    // whole game. Leaving is the menu's own Exit entry there.
     if (iVar8 != 0) {
       iVar10 = 99;
     }
+#endif
     iVar8 = (*g_CKeysPtr->vtable->getKeyState)(g_CKeysPtr,DIK_LCONTROL);
     if ((iVar8 != 0) &&
        (iVar8 = (*g_CKeysPtr->vtable->getAndClearKeyState)(g_CKeysPtr,DIK_M), iVar8 != 0)) {
