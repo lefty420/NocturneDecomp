@@ -9,6 +9,10 @@
 
 #include "nocturne.h"
 
+#if defined(NOCTURNE_UWP_LAUNCHER)
+extern "C" void nocturne_boot_log(const char *line);
+#endif
+
 LRESULT __stdcall wincore_winrun_cpp_mainWindowProc_FUN_005f3150(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     int iVar1;
@@ -135,6 +139,9 @@ LRESULT __stdcall wincore_winrun_cpp_mainWindowProc_FUN_005f3150(HWND hWnd, UINT
         if (1 < message) {
             if (message < 3) {
                 // WM_DESTROY
+#if defined(NOCTURNE_UWP_LAUNCHER)
+                nocturne_boot_log("WM_DESTROY: window asked to close");
+#endif
                 (*g_PostQuitMessageFunc)(0);
                 g_InputDisabled = 1;
             }

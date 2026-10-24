@@ -483,8 +483,14 @@ extern "C" void nocturne_gamepad_pump(void) {
     nav_repeating(kNavRight, ui && (button_down(SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || move_x >=  NOCTURNE_PAD_MOVE_THRESHOLD), now_ms);
     const bool start_down = button_down(SDL_CONTROLLER_BUTTON_START);
     nav_once(kNavConfirm, button_down(SDL_CONTROLLER_BUTTON_A), ui);
-    nav_once(kNavCancel, start_down || button_down(SDL_CONTROLLER_BUTTON_B),
-             nav_ok && (start_down || ui));
+#ifdef NOCTURNE_UWP_LAUNCHER
+    // On the console B backed out of the front end straight into the game's quit path. B keeps its own
+    // in-game binding; Start is the cancel/menu button.
+    const bool cancel_down = start_down;
+#else
+    const bool cancel_down = start_down || button_down(SDL_CONTROLLER_BUTTON_B);
+#endif
+    nav_once(kNavCancel, cancel_down, nav_ok && (start_down || ui));
 }
 
 // ---------------------------------------------------------------------------
