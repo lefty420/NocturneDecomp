@@ -997,9 +997,13 @@ LAB_005bc1a6:
        (pCVar10->can_attach_light != 0)) {
       uVar23 = (uint)(*flashlight == 0);
       *flashlight = uVar23;
+#if !defined(NOCTURNE_UWP_LAUNCHER)
+      // Original behaviour: switching the torch on also draws the guns. On the console build the pad has a
+      // separate draw button (left trigger), so X only works the torch.
       if (uVar23 != 0) {
         this_ptr->guns_drawn = 1;
       }
+#endif
       (*((this_ptr->base).base.base.vtable._ub)->playSound)
                 ((CDemonActor *)this_ptr,"flashlit.wav");
     }
