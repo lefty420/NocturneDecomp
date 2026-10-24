@@ -162,6 +162,10 @@ static char winShiftChar(char ch) {
     }
 }
 
+#if defined(NOCTURNE_UWP_LAUNCHER)
+extern "C" void nocturne_boot_log(const char *line);
+#endif
+
 static void translateSdlEvent(const SDL_Event& ev) {
     MSG msg;
     memset(&msg, 0, sizeof(msg));
@@ -169,6 +173,11 @@ static void translateSdlEvent(const SDL_Event& ev) {
 
     switch (ev.type) {
     case SDL_QUIT:
+#if defined(NOCTURNE_UWP_LAUNCHER)
+        // On the console a Back (B) press can surface as a quit request; leaving is the menu's own Quit entry.
+        nocturne_boot_log("SDL_QUIT ignored");
+        break;
+#endif
         msg.message = 0x0002; // WM_DESTROY
         s_msgQueue.push(msg);
         break;
