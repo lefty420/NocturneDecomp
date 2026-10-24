@@ -89,7 +89,7 @@ jobs:
           $libs = $env:UWPLIBS -replace '\\','/'
           cmake -S . -B build -G Ninja "-DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/uwp-x64.cmake" `
             "-DNOCTURNE_BUILD_EXE=ON" "-DNOCTURNE_BUILD_CHECK=OFF" "-DNOCTURNE_USE_CCACHE=OFF" `
-            "-DNOCTURNE_UWP_LIBS_DIR=$libs" "-DNOCTURNE_UWP_EXTRA_OBJECTS=$objs" "-DNOCTURNE_BUILD_TAG=exe-uwp-x64" *> configure.log
+            "-DCMAKE_EXE_LINKER_FLAGS=/MAP:nocturne.map" "-DNOCTURNE_UWP_LIBS_DIR=$libs" "-DNOCTURNE_UWP_EXTRA_OBJECTS=$objs" "-DNOCTURNE_BUILD_TAG=exe-uwp-x64" *> configure.log
           "configure exit: $LASTEXITCODE" | Out-File configure-exit.txt
           python .github\scripts\annotate_log.py --title "Configure ($(Get-Content configure-exit.txt))" --file configure.log --tail 25 --max-errors 12
           exit 0
@@ -111,6 +111,16 @@ jobs:
           ($lnk | Select-Object -First 40) -join "`n" | Out-File link-errors.txt
           if (Test-Path cc-families.txt) { python .github\scripts\annotate_log.py --title "Compile error families" --file cc-families.txt --tail 14 }
           if ((Get-Item link-errors.txt).Length -gt 4) { python .github\scripts\annotate_log.py --title "Link errors" --file link-errors.txt --tail 30 }
+          exit 0
+
+      - name: Symbol list for the profiler
+        if: always()
+        shell: pwsh
+        run: |
+          $map = Get-ChildItem build -Recurse -Filter '*.map' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $map) { "no map file written"; exit 0 }
+          "map: $($map.FullName) $($map.Length) bytes"
+          python .github\scripts\map_symbols.py $map.FullName
           exit 0
 
       - name: Collect output
