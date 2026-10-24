@@ -16,7 +16,10 @@ endif()
 # WINAPI_FAMILY_APP restricts the Windows headers to what a UWP app may call. -mmmx
 # matches the other lanes (the decompiled MMX code). clang-cl handles MS-style inline
 # asm blocks natively, so the Linux lane's -fasm-blocks has no equivalent here.
-set(_NOCTURNE_TARGET_FLAGS "/DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0A00 /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS -mmmx")
+# /O2 for the whole game: the default build here is unoptimised (-O0), which runs the decompiled engine at
+# 20-25 fps on the console. -fno-strict-aliasing keeps the decompiler's pointer type-punning valid (same
+# reason the project builds its hot files that way); -fwrapv is already applied by CMakeLists.txt.
+set(_NOCTURNE_TARGET_FLAGS "/DWINAPI_FAMILY=WINAPI_FAMILY_APP /D_WIN32_WINNT=0x0A00 /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS -mmmx /O2 -fno-strict-aliasing")
 set(CMAKE_C_FLAGS_INIT   "${_NOCTURNE_TARGET_FLAGS}")
 set(CMAKE_CXX_FLAGS_INIT "${_NOCTURNE_TARGET_FLAGS} /EHsc")
 
