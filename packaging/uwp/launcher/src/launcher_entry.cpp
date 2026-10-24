@@ -55,6 +55,10 @@ static LONG CALLBACK boot_crash_handler(PEXCEPTION_POINTERS ep) {
 
 namespace {
 void profiler_main(HANDLE target) {
+    FILE *out = std::fopen(nocturne_data_path("perf.log").c_str(), "w");
+    if (!out) out = stderr;
+    std::setvbuf(out, nullptr, _IONBF, 0);
+    std::fprintf(out, "profiler started\n");
     typedef DWORD(WINAPI * SuspendFn)(HANDLE);
     typedef BOOL(WINAPI * GetCtxFn)(HANDLE, LPCONTEXT);
     typedef DWORD(WINAPI * ModNameFn)(HMODULE, LPWSTR, DWORD);
@@ -143,7 +147,7 @@ void profiler_main(HANDLE target) {
             std::string line = "prof:";
             for (size_t i = 0; i < mods.size() && i < 6; ++i)
                 line += " " + mods[i].second + "=" + std::to_string(100 * mods[i].first / total) + "%";
-            std::fprintf(stderr, "%s (n=%d)\n", line.c_str(), total);
+            std::fprintf(out, "%s (n=%d)\n", line.c_str(), total);
             std::vector<std::pair<int, uint32_t>> top;
             for (auto &kv : by_rva) top.push_back({kv.second, kv.first});
             std::sort(top.rbegin(), top.rend());
@@ -153,13 +157,13 @@ void profiler_main(HANDLE target) {
                 std::snprintf(tmp, sizeof(tmp), " %x:%d", top[i].second, top[i].first);
                 hot += tmp;
             }
-            std::fprintf(stderr, "%s\n", hot.c_str());
+            std::fprintf(out, "%s\n", hot.c_str());
             std::vector<std::pair<int, std::string>> waits;
             for (auto &kv : by_wait) waits.push_back({kv.second, kv.first});
             std::sort(waits.rbegin(), waits.rend());
             std::string wl = "prof-wait:";
             for (size_t i = 0; i < waits.size() && i < 24; ++i) wl += " " + waits[i].second + ":" + std::to_string(waits[i].first);
-            std::fprintf(stderr, "%s\n", wl.c_str());
+            std::fprintf(out, "%s\n", wl.c_str());
             by_wait.clear();
             by_module.clear(); by_rva.clear(); total = 0; failed = 0;
             window = GetTickCount64();
