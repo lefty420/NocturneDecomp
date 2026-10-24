@@ -74,6 +74,7 @@ void profiler_main(HANDLE target) {
     std::unordered_map<uintptr_t, std::string> names;   // module base -> file name
     std::map<std::string, int> by_module;
     std::unordered_map<uint32_t, int> by_rva;
+    std::map<std::string, int> by_wait;   // "<caller rva>><its caller rva>" for samples outside our code
     int total = 0, failed = 0;
     ULONGLONG window = GetTickCount64();
     for (;;) {
@@ -82,8 +83,19 @@ void profiler_main(HANDLE target) {
         std::memset(&ctx, 0, sizeof(ctx));
         ctx.ContextFlags = 0x100001;   // CONTEXT_CONTROL (x64)
         uintptr_t rip = 0;
+        uintptr_t stack_copy[192];
+        bool have_stack = false;
         if (suspend(target) != (DWORD)-1) {
-            if (get_ctx(target, &ctx)) rip = static_cast<uintptr_t>(ctx.Rip);
+            if (get_ctx(target, &ctx)) {
+                rip = static_cast<uintptr_t>(ctx.Rip);
+                // Copy the top of the stack while the thread is paused, to find who called into the wait.
+                __try {
+                    std::memcpy(stack_copy, reinterpret_cast<const void *>(ctx.Rsp), sizeof(stack_copy));
+                    have_stack = true;
+                } __except (EXCEPTION_EXECUTE_HANDLER) {
+                    have_stack = false;
+                }
+            }
             resume(target);
         }
         if (rip == 0) { ++failed; continue; }
@@ -107,6 +119,23 @@ void profiler_main(HANDLE target) {
             if (reinterpret_cast<uintptr_t>(hm) == exe_base) ++by_rva[static_cast<uint32_t>(rip - exe_base)];
         }
         ++by_module[name];
+        if (have_stack && rip != 0 && !(rip >= exe_base && rip < exe_base + 0x1100000)) {
+            uint32_t found[2] = {0, 0};
+            int nf = 0;
+            for (size_t i = 0; i < 192 && nf < 2; ++i) {
+                const uintptr_t v = stack_copy[i];
+                if (v < exe_base + 0x1000 || v >= exe_base + 0x1097090) continue;
+                const uint8_t *c = reinterpret_cast<const uint8_t *>(v);
+                bool call_before = false;
+                __try {
+                    call_before = c[-5] == 0xE8 || c[-6] == 0xFF || c[-2] == 0xFF || c[-3] == 0xFF;
+                } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                if (call_before) found[nf++] = static_cast<uint32_t>(v - exe_base);
+            }
+            char key[40];
+            std::snprintf(key, sizeof(key), "%x>%x", found[0], found[1]);
+            ++by_wait[key];
+        }
         if (GetTickCount64() - window >= 5000 && total > 0) {
             std::vector<std::pair<int, std::string>> mods;
             for (auto &kv : by_module) mods.push_back({kv.second, kv.first});
@@ -125,6 +154,13 @@ void profiler_main(HANDLE target) {
                 hot += tmp;
             }
             std::fprintf(stderr, "%s\n", hot.c_str());
+            std::vector<std::pair<int, std::string>> waits;
+            for (auto &kv : by_wait) waits.push_back({kv.second, kv.first});
+            std::sort(waits.rbegin(), waits.rend());
+            std::string wl = "prof-wait:";
+            for (size_t i = 0; i < waits.size() && i < 24; ++i) wl += " " + waits[i].second + ":" + std::to_string(waits[i].first);
+            std::fprintf(stderr, "%s\n", wl.c_str());
+            by_wait.clear();
             by_module.clear(); by_rva.clear(); total = 0; failed = 0;
             window = GetTickCount64();
         }
