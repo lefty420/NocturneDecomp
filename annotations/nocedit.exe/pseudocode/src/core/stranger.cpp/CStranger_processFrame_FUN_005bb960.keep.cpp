@@ -7,7 +7,6 @@
 
 #include "nocturne.h"
 
-
 void __cdecl core_stranger_cpp_CStranger_processFrame_FUN_005bb960(CStranger *this_ptr,float delta_time)
 
 {
@@ -993,25 +992,14 @@ LAB_005bc1a6:
         }
       }
     }
-#if defined(NOCTURNE_UWP_LAUNCHER)
-    // The beam is drawn from the gun, and holstering the guns switches the torch off in this game. On the
-    // console build the pad has separate buttons: left trigger draws/holsters, X only works the torch, and
-    // only while the guns are out.
-    if ((((this_ptr->base).player_input.action_state.light != 0) && (this_ptr->guns_drawn != 0) &&
-#else
     if ((((this_ptr->base).player_input.action_state.light != 0) &&
-#endif
         (pCVar10 = (this_ptr->base).inventory.selected_weapon, pCVar10 != (CWeapon *)0x0)) &&
        (pCVar10->can_attach_light != 0)) {
       uVar23 = (uint)(*flashlight == 0);
       *flashlight = uVar23;
-#if !defined(NOCTURNE_UWP_LAUNCHER)
-      // Original behaviour: switching the torch on also draws the guns. (On the console build X never touches
-      // the guns; see the condition above.)
       if (uVar23 != 0) {
         this_ptr->guns_drawn = 1;
       }
-#endif
       (*((this_ptr->base).base.base.vtable._ub)->playSound)
                 ((CDemonActor *)this_ptr,"flashlit.wav");
     }
