@@ -395,6 +395,38 @@ void restore_scene_target() {
     }
 }
 
+
+// Frame statistics for the console build: once a second, how long a frame takes overall and how much of
+// that is spent inside the swap (waiting on the display / the GPU) — tells a CPU limit from a GPU or vsync one.
+#if defined(NOCTURNE_UWP_LAUNCHER)
+static void timed_swap(SDL_Window *window) {
+    static Uint64 last_swap = 0, window_start = 0, swap_total = 0, frame_total = 0, frame_max = 0;
+    static int frames = 0;
+    const Uint64 freq = SDL_GetPerformanceFrequency();
+    const Uint64 t0 = SDL_GetPerformanceCounter();
+    SDL_GL_SwapWindow(window);
+    const Uint64 t1 = SDL_GetPerformanceCounter();
+    swap_total += t1 - t0;
+    if (last_swap != 0) {
+        const Uint64 f = t1 - last_swap;
+        frame_total += f;
+        if (f > frame_max) frame_max = f;
+        ++frames;
+    }
+    last_swap = t1;
+    if (window_start == 0) window_start = t1;
+    if (t1 - window_start >= freq * 5 && frames > 0) {
+        fprintf(stderr, "perf: %.1f fps, frame %.1f ms (worst %.1f), swap wait %.1f ms\n",
+                     (double)frames * freq / (double)(t1 - window_start),
+                     1000.0 * frame_total / frames / freq, 1000.0 * frame_max / freq,
+                     1000.0 * swap_total / frames / freq);
+        window_start = t1; swap_total = frame_total = frame_max = 0; frames = 0;
+    }
+}
+#else
+static void timed_swap(SDL_Window *window) { SDL_GL_SwapWindow(window); }
+#endif
+
 // Draws `texture` to the WINDOW, letterboxed to the logical size (or, with no
 // logical size set, `fallback_w` x `fallback_h`), swaps, and goes back to the
 // scene target. `flipped` samples it bottom-up, as a render target is drawn.
@@ -441,7 +473,7 @@ void present_to_window(GLuint texture, int fallback_w, int fallback_h, bool flip
         DLOG_RL("render", 1, 600, "gl_present: present quad unavailable — frame not drawn");
     }
 
-    SDL_GL_SwapWindow(g_gl.window);
+    timed_swap(g_gl.window);
     restore_scene_target();
 }
 
@@ -535,7 +567,7 @@ extern "C" void nocturne_gl_present_scene(void) {
 
 extern "C" void nocturne_gl_swap_only(void) {
     if (!g_gl.active) return;
-    SDL_GL_SwapWindow(g_gl.window);
+    timed_swap(g_gl.window);
     restore_scene_target();
 }
 
