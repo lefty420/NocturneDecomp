@@ -7,6 +7,11 @@
 
 #include "nocturne.h"
 
+#if defined(NOCTURNE_UWP_LAUNCHER)
+// Set when the torch button (not the draw button) brought the guns out.
+static int s_torch_drew_guns = 0;
+#endif
+
 void __cdecl core_stranger_cpp_CStranger_processFrame_FUN_005bb960(CStranger *this_ptr,float delta_time)
 
 {
@@ -980,6 +985,9 @@ LAB_005bc1a6:
 #endif
   if (local_1c != 0) {
     if ((this_ptr->base).player_input.action_state.draw != 0) {
+#if defined(NOCTURNE_UWP_LAUNCHER)
+      s_torch_drew_guns = 0;
+#endif
       if (this_ptr->guns_drawn == 0) {
         this_ptr->guns_drawn = 1;
       }
@@ -997,9 +1005,20 @@ LAB_005bc1a6:
        (pCVar10->can_attach_light != 0)) {
       uVar23 = (uint)(*flashlight == 0);
       *flashlight = uVar23;
-#if !defined(NOCTURNE_UWP_LAUNCHER)
-      // Original behaviour: switching the torch on also draws the guns. On the console build the pad has a
-      // separate draw button (left trigger), so X only works the torch.
+#if defined(NOCTURNE_UWP_LAUNCHER)
+      // The torch beam is drawn from the gun, so it needs the guns out (original behaviour). On the console
+      // build, if X is what brought the guns out, switching the torch off puts them away again; guns that
+      // were already out (left trigger) stay out.
+      {
+        if (uVar23 != 0) {
+          if (this_ptr->guns_drawn == 0) s_torch_drew_guns = 1;
+          this_ptr->guns_drawn = 1;
+        } else if (s_torch_drew_guns) {
+          this_ptr->guns_drawn = 0;
+          s_torch_drew_guns = 0;
+        }
+      }
+#else
       if (uVar23 != 0) {
         this_ptr->guns_drawn = 1;
       }
