@@ -18,6 +18,21 @@ set(NOCTURNE_DEPENDENCIES_FILE "${CMAKE_SOURCE_DIR}/cmake/uwp_libs.cmake")
 # main.cpp is in an object library, so this must be set directory-wide, before any target exists.
 add_compile_definitions(NOCTURNE_UWP_LAUNCHER=1)
 
+# Hot pixel loops. The console build otherwise compiles without optimisation, and profiling the running
+# game (docs/xbox-uwp.md) put most CPU time in the software lighting blends (core/dstrender) and in the
+# pixel conversion and upload code (shims/gl, shims/renderer). Build just those at -O2, the way the
+# project already does for its scanline rasterisers: -fwrapv is applied globally, -fno-strict-aliasing keeps
+# the decompiler's pointer type-punning valid. Optimising the whole game broke input handling on the
+# console, so it stays at the default everywhere else.
+set(_PSEUDO "${CMAKE_SOURCE_DIR}/annotations/nocedit.exe/pseudocode")
+file(GLOB _uwp_hot CONFIGURE_DEPENDS
+    "${_PSEUDO}/src/core/dstrender.cpp/*.cpp"
+    "${_PSEUDO}/shims/gl/*.cpp"
+    "${_PSEUDO}/shims/renderer/*.cpp")
+set_source_files_properties(${_uwp_hot} PROPERTIES
+    COMPILE_OPTIONS "-O2;-fno-strict-aliasing"
+    SKIP_PRECOMPILE_HEADERS ON)
+
 function(nocturne_platform_finalize target)
     # The launcher (settings, adding the game files) runs before the game.
     set(_L "${CMAKE_SOURCE_DIR}/packaging/uwp/launcher/src")
