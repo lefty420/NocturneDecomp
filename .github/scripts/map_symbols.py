@@ -17,7 +17,8 @@ def notice(title, text):
 
 
 lines = open(sys.argv[1], errors="replace").read().splitlines()
-notice("map head", "\n".join(l[:120] for l in lines[:14]))
+if len(sys.argv) < 4:
+    notice("map head", "\n".join(l[:120] for l in lines[:14]))
 pat = re.compile(r"^\s*([0-9a-fA-F]{4}):([0-9a-fA-F]{8})\s+(\S+)\s+([0-9a-fA-F]{8,16})\b")
 syms = []
 for l in lines:
@@ -28,7 +29,9 @@ for l in lines:
             rva -= 0x140000000
         syms.append((rva, m.group(3)))
 syms.sort()
-notice("map symbols", "code symbols: %d; first %s" % (len(syms), syms[:3]))
+if len(sys.argv) < 4:
+    notice("map symbols", "code symbols: %d; first %s" % (len(syms), syms[:3]))
+label = sys.argv[3] if len(sys.argv) > 3 else "hot functions"
 if len(sys.argv) < 3 or not syms:
     sys.exit(0)
 
@@ -50,4 +53,4 @@ for name, n in rows[:60]:
 if chunk:
     out.append("\n".join(chunk))
 for k, c in enumerate(out[:6]):
-    notice("hot functions %d (of %d samples)" % (k + 1, total), c)
+    notice("%s %d (of %d samples)" % (label, k + 1, total), c)
