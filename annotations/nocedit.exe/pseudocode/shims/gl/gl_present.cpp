@@ -11,6 +11,9 @@
 #include "core/debug_log.h"
 
 #include <SDL.h>
+#if defined(NOCTURNE_UWP_LAUNCHER)
+#include "core/data_root.h"
+#endif
 
 #if NOCTURNE_GL_PRESENT
 
@@ -416,10 +419,20 @@ static void timed_swap(SDL_Window *window) {
     last_swap = t1;
     if (window_start == 0) window_start = t1;
     if (t1 - window_start >= freq * 5 && frames > 0) {
-        fprintf(stderr, "perf: %.1f fps, frame %.1f ms (worst %.1f), swap wait %.1f ms\n",
-                     (double)frames * freq / (double)(t1 - window_start),
-                     1000.0 * frame_total / frames / freq, 1000.0 * frame_max / freq,
-                     1000.0 * swap_total / frames / freq);
+        // Its own small file (fresh every launch), because stderr is not always captured on the console.
+        static FILE *fps_log = nullptr;
+        static bool fps_log_tried = false;
+        if (!fps_log_tried) {
+            fps_log_tried = true;
+            fps_log = fopen(nocturne_data_path("fps.log").c_str(), "w");
+        }
+        if (fps_log) {
+            fprintf(fps_log, "%.1f fps, frame %.1f ms (worst %.1f), swap wait %.1f ms\n",
+                    (double)frames * freq / (double)(t1 - window_start),
+                    1000.0 * frame_total / frames / freq, 1000.0 * frame_max / freq,
+                    1000.0 * swap_total / frames / freq);
+            fflush(fps_log);
+        }
         window_start = t1; swap_total = frame_total = frame_max = 0; frames = 0;
     }
 }
