@@ -121,8 +121,8 @@ jobs:
           if (-not $map) { "no map file written"; exit 0 }
           "map: $($map.FullName) $($map.Length) bytes"
           python .github\scripts\map_symbols.py $map.FullName
-          if (Test-Path .github\profile_rvas.txt) { python .github\scripts\map_symbols.py $map.FullName .github\profile_rvas.txt "cpu hot" }
-          if (Test-Path .github\profile_waits.txt) { python .github\scripts\map_symbols.py $map.FullName .github\profile_waits.txt "wait callers" }
+          if (Test-Path .github\profile_rvas.dat) { python .github\scripts\map_symbols.py $map.FullName .github\profile_rvas.dat "cpu hot" }
+          if (Test-Path .github\profile_waits.dat) { python .github\scripts\map_symbols.py $map.FullName .github\profile_waits.dat "wait callers" }
           exit 0
 
       - name: Collect output
