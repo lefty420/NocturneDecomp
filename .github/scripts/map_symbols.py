@@ -54,3 +54,20 @@ if chunk:
     out.append("\n".join(chunk))
 for k, c in enumerate(out[:6]):
     notice("%s %d (of %d samples)" % (label, k + 1, total), c)
+
+# Neighbourhood of the busiest address clusters: a hot function without a public name is attributed to the
+# symbol before it, so show what surrounds each cluster (with the distance to the next symbol).
+cl = defaultdict(int)
+for tok in re.findall(r"([0-9a-fA-F]+):(\d+)", open(sys.argv[2], errors="replace").read()):
+    cl[int(tok[0], 16) >> 10] += int(tok[1])
+top = sorted(cl.items(), key=lambda kv: -kv[1])[:8]
+blocks = []
+for key, n in top:
+    base = key << 10
+    i = bisect.bisect_right(addrs, base) - 1
+    lines_ = ["cluster %x (%d samples)" % (base, n)]
+    for j in range(max(i - 1, 0), min(i + 5, len(syms) - 1)):
+        lines_.append("  %x +%x %s" % (syms[j][0], syms[j + 1][0] - syms[j][0], syms[j][1][:70]))
+    blocks.append("\n".join(lines_))
+for k in range(0, len(blocks), 4):
+    notice("%s context %d" % (label, k // 4 + 1), "\n".join(blocks[k:k + 4]))
