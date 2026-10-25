@@ -145,7 +145,52 @@ std::string for_writing(const std::string &relative) {
 
 }  // namespace
 
+namespace {
+std::string resolve_uncached(const char *path, WatcomPathUse use);
+}
+
+#if defined(NOCTURNE_UWP_LAUNCHER)
+// On the console every resolution is several filesystem calls through the C++ <filesystem> layer, and the
+// game opens files constantly (profiling showed this at around 40% of the game's own CPU time). A read that
+// found its file keeps the answer; anything that could change the answer (a write, remove, rename, or a
+// touch, which all resolve with WatcomPathUse::Write) forgets everything. A path that did not resolve to an
+// existing file is never remembered.
+#include <mutex>
+#include <unordered_map>
+
 std::string watcom_resolve_fs_path(const char *path, WatcomPathUse use) {
+    static std::mutex lock;
+    static std::unordered_map<std::string, std::string> cache;
+    if (path == nullptr) return std::string();
+    if (use == WatcomPathUse::Write) {
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            cache.clear();
+        }
+        return resolve_uncached(path, use);
+    }
+    const std::string key(path);
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        auto it = cache.find(key);
+        if (it != cache.end()) return it->second;
+    }
+    std::string resolved = resolve_uncached(path, use);
+    if (exists(resolved)) {
+        std::lock_guard<std::mutex> guard(lock);
+        if (cache.size() > 8192) cache.clear();
+        cache[key] = resolved;
+    }
+    return resolved;
+}
+#else
+std::string watcom_resolve_fs_path(const char *path, WatcomPathUse use) {
+    return resolve_uncached(path, use);
+}
+#endif
+
+namespace {
+std::string resolve_uncached(const char *path, WatcomPathUse use) {
     if (path == nullptr) return std::string();
     const std::string relative = slashed(path);
     const WatcomPathRoots &r = roots();
@@ -159,6 +204,7 @@ std::string watcom_resolve_fs_path(const char *path, WatcomPathUse use) {
     }
     return r.data.empty() ? resolve_case_insensitive(relative) : under(r.data, relative);
 }
+}  // namespace
 
 std::vector<std::string> watcom_resolve_fs_dirs(const char *directory) {
     const std::string relative = slashed(directory == nullptr ? "" : directory);
