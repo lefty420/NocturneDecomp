@@ -125,6 +125,25 @@ jobs:
           if (Test-Path .github\profile_waits.dat) { python .github\scripts\map_symbols.py $map.FullName .github\profile_waits.dat "wait callers" }
           exit 0
 
+      - name: Optimisation check
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path build\build.ninja) {
+            $lines = Get-Content build\build.ninja
+            $out = @()
+            foreach ($key in 'trigl_device.cpp.obj','gl_present.cpp.obj','blendVHBilerp','drawAlphaBlendedPixels','CGame_processFrame','CStranger_processFrame') {
+              $i = ($lines | Select-String -SimpleMatch "$key" | Select-Object -First 1).LineNumber
+              if ($i) {
+                $blk = $lines[($i-1)..([Math]::Min($i+6, $lines.Count-1))] | Where-Object { $_ -match '^\s+FLAGS' }
+                $out += "$key => " + (($blk -join ' ') -replace '\s+',' ').Substring(0, [Math]::Min(300, (($blk -join ' ') -replace '\s+',' ').Length))
+              } else { $out += "$key => (not found)" }
+            }
+            $out | Out-File opt-check.txt
+            python .github\scripts\annotate_log.py --title "Optimisation check" --file opt-check.txt --tail 8
+          }
+          exit 0
+
       - name: Collect output
         if: always()
         shell: pwsh

@@ -62,18 +62,55 @@ inline void nocturne_gl_read_pixels(GLenum read_buffer, GLsizei width, GLsizei h
     const int bytes = nocturne_gl_pixel_bytes(format, type);
     gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
 #if NOCTURNE_GLES
-    unsigned char *rgba = (unsigned char *)malloc((size_t)width * (size_t)height * 4u);
+    // A scratch buffer kept between frames: this runs once a frame at the full render size.
+    static unsigned char *scratch = nullptr;
+    static size_t scratch_size = 0;
+    const size_t need = (size_t)width * (size_t)height * 4u;
+    if (need > scratch_size) {
+        free(scratch);
+        scratch = (unsigned char *)malloc(need);
+        scratch_size = scratch ? need : 0;
+    }
+    unsigned char *rgba = scratch;
     if (rgba == nullptr) return;
     gl.ReadBuffer(read_buffer);
     gl.ReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    // Same results as nocturne_gl_pack_rgba, one row at a time with the format decided once. The 5/6-bit
+    // levels come from tables built with the exact rounding that function uses.
+    static unsigned char to5[256], to6[256];
+    static bool tables_ready = false;
+    if (!tables_ready) {
+        for (unsigned i = 0; i < 256; ++i) {
+            to5[i] = (unsigned char)((i * 31u + 127u) / 255u);
+            to6[i] = (unsigned char)((i * 63u + 127u) / 255u);
+        }
+        tables_ready = true;
+    }
     for (GLsizei y = 0; y < height; ++y) {
         unsigned char *row = (unsigned char *)dst + (size_t)y * (size_t)pitch;
         const unsigned char *from = rgba + (size_t)y * (size_t)width * 4u;
-        for (GLsizei x = 0; x < width; ++x) {
-            nocturne_gl_pack_rgba(from + (size_t)x * 4u, format, type, row + (size_t)x * bytes);
+        if (format == GL_BGRA) {
+            for (GLsizei x = 0; x < width; ++x) {
+                unsigned int v;
+                memcpy(&v, from + (size_t)x * 4u, 4);
+                v = (v & 0xFF00FF00u) | ((v & 0xFFu) << 16) | ((v >> 16) & 0xFFu);
+                memcpy(row + (size_t)x * 4u, &v, 4);
+            }
+        } else if (type == GL_UNSIGNED_SHORT_5_6_5) {
+            for (GLsizei x = 0; x < width; ++x) {
+                const unsigned char *px = from + (size_t)x * 4u;
+                const unsigned short packed =
+                    (unsigned short)(((unsigned)to5[px[0]] << 11) | ((unsigned)to6[px[1]] << 5) | to5[px[2]]);
+                memcpy(row + (size_t)x * 2u, &packed, 2);
+            }
+        } else {
+            for (GLsizei x = 0; x < width; ++x) {
+                const unsigned char *px = from + (size_t)x * 4u;
+                unsigned char *o = row + (size_t)x * 3u;
+                o[0] = px[0]; o[1] = px[1]; o[2] = px[2];
+            }
         }
     }
-    free(rgba);
 #else
     gl.PixelStorei(GL_PACK_ROW_LENGTH, pitch / bytes);
     gl.ReadBuffer(read_buffer);

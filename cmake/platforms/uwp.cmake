@@ -28,7 +28,16 @@ set(_PSEUDO "${CMAKE_SOURCE_DIR}/annotations/nocedit.exe/pseudocode")
 file(GLOB _uwp_hot CONFIGURE_DEPENDS
     "${_PSEUDO}/src/core/dstrender.cpp/*.cpp"
     "${_PSEUDO}/shims/gl/*.cpp"
-    "${_PSEUDO}/shims/renderer/*.cpp")
+    "${_PSEUDO}/shims/renderer/*.cpp"
+    "${_PSEUDO}/src/engine/font.cpp/drawAlphaBlendedPixels_*"
+    "${_PSEUDO}/src/engine/special.cpp/renderAlphaRow32_*"
+    "${_PSEUDO}/src/engine/special.cpp/renderScanline_*"
+    "${_PSEUDO}/src/engine/2d.c/plotPixel_*"
+    "${_PSEUDO}/src/engine/2d.c/drawHLine_*"
+    "${_PSEUDO}/src/core/dcamera.cpp/CDemonCamera_addLightmapToCorona_*"
+    "${_PSEUDO}/src/core/dcamera.cpp/CDemonCamera_compositeLightmapToFramebuffer_*"
+    "${_PSEUDO}/src/core/dcamera.cpp/CDemonCamera_blendLightmapPixel32_*"
+    "${_PSEUDO}/src/core/game.cpp/CGame_renderIrisFade_*")
 set_source_files_properties(${_uwp_hot} PROPERTIES
     COMPILE_OPTIONS "-O2;-fno-strict-aliasing"
     SKIP_PRECOMPILE_HEADERS ON)
