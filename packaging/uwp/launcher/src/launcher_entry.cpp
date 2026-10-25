@@ -196,7 +196,12 @@ extern "C" void nocturne_boot_init(void) {
     // The game reports problems on stderr, which a UWP app has nowhere to show: keep it in a file.
     const std::string errpath = nocturne_data_path("stderr.log");
     if (std::freopen(errpath.c_str(), "a", stderr)) std::setvbuf(stderr, nullptr, _IONBF, 0);
-    start_profiler();
+    // The sampler pauses the game thread many times a second, so it only runs when asked for: put a file
+    // called profile.flag in the app data folder (next to startup.log) and restart.
+    if (FILE *f = std::fopen(nocturne_data_path("profile.flag").c_str(), "rb")) {
+        std::fclose(f);
+        start_profiler();
+    }
 
     typedef PVOID(WINAPI * AddVehFn)(ULONG, PVECTORED_EXCEPTION_HANDLER);
     for (const wchar_t *mod : {L"kernelbase.dll", L"kernel32.dll"}) {
