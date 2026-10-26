@@ -86,7 +86,13 @@ int main(int argc, char** argv)
     if (!nocturne_uwp_run_launcher()) { nocturne_boot_log("launcher: player quit"); return 0; }
     nocturne_boot_log("launcher done, starting the game");
 #endif
+#ifdef NOCTURNE_UWP_LAUNCHER
+    nocturne_boot_log("shims_init_all: begin");
+#endif
     shims_init_all();
+#ifdef NOCTURNE_UWP_LAUNCHER
+    nocturne_boot_log("shims_init_all: done, static initializers: begin");
+#endif
     runStaticInitializers();
 #ifdef NOCTURNE_UWP_LAUNCHER
     nocturne_boot_log("shims and static initializers done, entering the game");

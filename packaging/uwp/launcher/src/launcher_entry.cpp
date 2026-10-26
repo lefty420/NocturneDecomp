@@ -34,17 +34,85 @@ extern "C" void nocturne_boot_log(const char *line) {
     std::fclose(f);
 }
 
+// Names the module an address falls in, as "name+0xRVA" (or "base+0xRVA" when the name is not available).
+static void describe_addr(const void *addr, char *out, size_t cap) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!addr || !VirtualQuery(addr, &mbi, sizeof mbi) || !mbi.AllocationBase) {
+        std::snprintf(out, cap, "%p", addr);
+        return;
+    }
+    typedef DWORD(WINAPI * GetModNameFn)(HMODULE, LPWSTR, DWORD);
+    static GetModNameFn get_name = [] {
+        for (const wchar_t *mod : {L"kernelbase.dll", L"kernel32.dll"}) {
+            HMODULE h = GetModuleHandleW(mod);
+            if (h) {
+                FARPROC f = GetProcAddress(h, "GetModuleFileNameW");
+                if (f) return reinterpret_cast<GetModNameFn>(reinterpret_cast<void *>(f));
+            }
+        }
+        return static_cast<GetModNameFn>(nullptr);
+    }();
+    wchar_t wname[260] = {0};
+    char name[260] = {0};
+    if (get_name && get_name(static_cast<HMODULE>(mbi.AllocationBase), wname, 260) > 0) {
+        const wchar_t *slash = wname;
+        for (const wchar_t *c = wname; *c; ++c)
+            if (*c == L'\\' || *c == L'/') slash = c + 1;
+        size_t n = 0;
+        while (slash[n] && n < sizeof name - 1) { name[n] = static_cast<char>(slash[n] < 128 ? slash[n] : '?'); ++n; }
+    }
+    std::snprintf(out, cap, "%s@%p+0x%llx", name[0] ? name : "module", mbi.AllocationBase,
+                  static_cast<unsigned long long>(static_cast<const char *>(addr) - static_cast<const char *>(mbi.AllocationBase)));
+}
+
+static DWORD g_main_tid = 0;
+
+static void log_crash(const char *tag, PEXCEPTION_POINTERS ep) {
+    char where[400], line[700];
+    describe_addr(ep->ExceptionRecord->ExceptionAddress, where, sizeof where);
+    const ULONG_PTR *info = ep->ExceptionRecord->ExceptionInformation;
+    const char *kind = "";
+    if (ep->ExceptionRecord->ExceptionCode == 0xC0000005 && ep->ExceptionRecord->NumberParameters >= 2)
+        kind = info[0] == 0 ? " read" : (info[0] == 1 ? " write" : " execute");
+    std::snprintf(line, sizeof line, "%s %08lx%s of %p at %s, thread %lu%s", tag,
+                  static_cast<unsigned long>(ep->ExceptionRecord->ExceptionCode), kind,
+                  ep->ExceptionRecord->NumberParameters >= 2 ? reinterpret_cast<void *>(info[1]) : nullptr, where,
+                  static_cast<unsigned long>(GetCurrentThreadId()),
+                  GetCurrentThreadId() == g_main_tid ? " (game thread)" : " (other thread)");
+    nocturne_boot_log(line);
+    // The call stack, as module+offset, so a system-library crash can be traced back to what called it.
+    typedef USHORT(WINAPI * CaptureFn)(ULONG, ULONG, PVOID *, PULONG);
+    CaptureFn capture = nullptr;
+    for (const wchar_t *mod : {L"kernelbase.dll", L"kernel32.dll", L"ntdll.dll"}) {
+        HMODULE h = GetModuleHandleW(mod);
+        FARPROC f = h ? GetProcAddress(h, "RtlCaptureStackBackTrace") : nullptr;
+        if (f) { capture = reinterpret_cast<CaptureFn>(reinterpret_cast<void *>(f)); break; }
+    }
+    if (capture) {
+        void *frames[24];
+        const USHORT n = capture(0, 24, frames, nullptr);
+        for (USHORT i = 0; i < n; ++i) {
+            char d[400];
+            describe_addr(frames[i], d, sizeof d);
+            std::snprintf(line, sizeof line, "  frame %u: %s", static_cast<unsigned>(i), d);
+            nocturne_boot_log(line);
+        }
+    }
+}
+
+// Sees every exception first, including ones the code handles itself, so a line here is not always
+// fatal. "FATAL" below comes from the unhandled-exception filter and means the app is going down.
 static LONG CALLBACK boot_crash_handler(PEXCEPTION_POINTERS ep) {
     const DWORD code = ep->ExceptionRecord->ExceptionCode;
     static volatile LONG busy = 0;
     if ((code & 0xF0000000u) != 0xC0000000u || InterlockedExchange(&busy, 1)) return EXCEPTION_CONTINUE_SEARCH;
-    char buf[200];
-    const char *base = reinterpret_cast<const char *>(GetModuleHandleW(nullptr));
-    std::snprintf(buf, sizeof buf, "EXCEPTION %08lx at exe+0x%llx (addr %p)", static_cast<unsigned long>(code),
-                  static_cast<unsigned long long>(static_cast<const char *>(ep->ExceptionRecord->ExceptionAddress) - base),
-                  ep->ExceptionRecord->ExceptionAddress);
-    nocturne_boot_log(buf);
+    log_crash("EXCEPTION", ep);
     InterlockedExchange(&busy, 0);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static LONG WINAPI boot_fatal_filter(PEXCEPTION_POINTERS ep) {
+    log_crash("FATAL", ep);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -221,6 +289,15 @@ extern "C" void nocturne_boot_init(void) {
         start_profiler();
     }
 
+    g_main_tid = GetCurrentThreadId();
+    {
+        typedef LPTOP_LEVEL_EXCEPTION_FILTER(WINAPI * SetFilterFn)(LPTOP_LEVEL_EXCEPTION_FILTER);
+        for (const wchar_t *mod : {L"kernelbase.dll", L"kernel32.dll"}) {
+            HMODULE h = GetModuleHandleW(mod);
+            FARPROC f = h ? GetProcAddress(h, "SetUnhandledExceptionFilter") : nullptr;
+            if (f) { reinterpret_cast<SetFilterFn>(reinterpret_cast<void *>(f))(boot_fatal_filter); break; }
+        }
+    }
     typedef PVOID(WINAPI * AddVehFn)(ULONG, PVECTORED_EXCEPTION_HANDLER);
     for (const wchar_t *mod : {L"kernelbase.dll", L"kernel32.dll"}) {
         HMODULE h = GetModuleHandleW(mod);

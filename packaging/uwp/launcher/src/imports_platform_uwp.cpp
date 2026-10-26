@@ -306,17 +306,33 @@ void add_platform_providers(std::vector<ImportProvider> &out) {
 // On Xbox the B button is the system "back" action; an app that leaves it unhandled is closed by the
 // console. SDL only registers a handler when it is built for Windows 10 and this one is not, so claim
 // it ourselves. The handler has to be added from the UI thread, which is not the one the game runs on.
-extern "C" void nocturne_uwp_claim_back_button(void) {
+// SDL's WinRT shell runs SDL_main on the app's UI thread and only lets the UI thread's dispatcher run queued work
+// when the game pumps events. So work that has to happen now must run directly when we are on that thread:
+// queueing it and waiting would block the very thread that has to run it.
+static bool on_ui_thread() {
     try {
-        CoreApplication::MainView->Dispatcher->RunAsync(
-            CoreDispatcherPriority::Normal, ref new DispatchedHandler([]() {
-                try {
-                    SystemNavigationManager::GetForCurrentView()->BackRequested +=
-                        ref new EventHandler<BackRequestedEventArgs ^>(
-                            [](Platform::Object ^, BackRequestedEventArgs ^ args) { args->Handled = true; });
-                } catch (Platform::Exception ^) {
-                }
-            }));
+        return CoreApplication::MainView->Dispatcher->HasThreadAccess;
+    } catch (Platform::Exception ^) {
+        return false;
+    }
+}
+
+static void claim_back_now() {
+    try {
+        SystemNavigationManager::GetForCurrentView()->BackRequested +=
+            ref new EventHandler<BackRequestedEventArgs ^>([](Platform::Object ^, BackRequestedEventArgs ^ args) { args->Handled = true; });
+    } catch (Platform::Exception ^) {
+    }
+}
+
+extern "C" void nocturne_uwp_claim_back_button(void) {
+    if (on_ui_thread()) {
+        claim_back_now();
+        return;
+    }
+    try {
+        CoreApplication::MainView->Dispatcher->RunAsync(CoreDispatcherPriority::Normal,
+                                                        ref new DispatchedHandler([]() { claim_back_now(); }));
     } catch (Platform::Exception ^) {
     }
 }
@@ -330,6 +346,13 @@ extern "C" int nocturne_uwp_set_output_height(int height) {
     static std::atomic<int> state{-2};   // -2 pending, otherwise the result
     state = -2;
     const bool want_native = height >= 1500;
+    if (on_ui_thread()) {
+        try {
+            return Windows::UI::ViewManagement::ApplicationViewScaling::TrySetDisableLayoutScaling(want_native) ? 1 : 0;
+        } catch (Platform::Exception ^) {
+            return 0;
+        }
+    }
     try {
         CoreApplication::MainView->Dispatcher->RunAsync(
             CoreDispatcherPriority::Normal, ref new DispatchedHandler([want_native]() {
