@@ -2,6 +2,7 @@
 // launcher (settings, game files) and reports whether the player chose Play.
 #include "launcher_main.h"
 #include "game_files.h"
+#include "settings_store.h"
 
 #include "core/data_root.h"
 
@@ -19,6 +20,11 @@
 // Breadcrumbs and a crash note in <LocalState>\startup.log: a UWP app that dies at start-up shows
 // nothing. Read it through Device Portal (File explorer > LocalAppData > the app > LocalState).
 extern "C" void nocturne_uwp_claim_back_button(void);   // imports_platform_uwp.cpp (C++/CX)
+extern "C" int nocturne_uwp_set_output_height(int height);   // imports_platform_uwp.cpp (C++/CX)
+
+// The output size this run asked the console for at start-up (1080 or 2160), so Play can tell when the player
+// has changed it since and the app needs to start again for it to apply.
+static int g_boot_output_height = 1080;
 
 extern "C" void nocturne_boot_log(const char *line) {
     const std::string path = nocturne_data_path("startup.log");
@@ -193,6 +199,18 @@ extern "C" void nocturne_boot_init(void) {
     // set before SDL creates the window.
     SDL_SetHint("SDL_WINRT_HANDLE_BACK_BUTTON", "1");
     nocturne_uwp_claim_back_button();
+    // Output resolution (launcher.ini, Graphics tab). Read the file directly rather than through the game's
+    // cached settings, which must not be loaded before the launcher has had its say.
+    {
+        const NocturneLauncherSettings ls =
+            nl::load_settings(std::filesystem::path(nocturne_data_root()) / "launcher.ini");
+        g_boot_output_height = ls.output_height >= 1500 ? 2160 : 1080;
+        const int took = nocturne_uwp_set_output_height(g_boot_output_height);
+        char line[96];
+        std::snprintf(line, sizeof line, "output: asked for %dp native pixels=%s (result %d)", g_boot_output_height,
+                      g_boot_output_height >= 1500 ? "yes" : "no", took);
+        nocturne_boot_log(line);
+    }
     // The game reports problems on stderr, which a UWP app has nowhere to show: keep it in a file.
     const std::string errpath = nocturne_data_path("stderr.log");
     if (std::freopen(errpath.c_str(), "a", stderr)) std::setvbuf(stderr, nullptr, _IONBF, 0);
@@ -272,5 +290,17 @@ extern "C" int nocturne_uwp_run_launcher(void) {
     SDL_DestroyRenderer(r);
     SDL_DestroyWindow(w);
     SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
+    if (res == nl::LaunchResult::Play) {
+        // A changed output size only takes effect for a fresh window. Start the app again; the Play flag is
+        // already written, so it comes straight back into the game.
+        const NocturneLauncherSettings ls =
+            nl::load_settings(std::filesystem::path(nocturne_data_root()) / "launcher.ini");
+        const int want = ls.output_height >= 1500 ? 2160 : 1080;
+        if (want != g_boot_output_height) {
+            nocturne_boot_log("launcher: output size changed, restarting the app to apply it");
+            nocturne_uwp_restart_app();   // returns only if the console refused the restart
+            nocturne_boot_log("launcher: restart refused, starting the game at the old output size");
+        }
+    }
     return res == nl::LaunchResult::Play ? 1 : 0;
 }

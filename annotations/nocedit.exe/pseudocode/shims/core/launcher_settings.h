@@ -19,6 +19,11 @@ struct NocturneLauncherSettings {
     float turn_rate;        // 0.05 .. 1.00   left/right look speed
     float look_rate;        // 0.05 .. 1.00   up/down look speed
     int   invert_look;      // 0 or 1
+
+    // Display. Added with the Xbox port; the shipped game has no equivalent.
+    int   upscaler;         // 0 = plain scaling (default), 1 = FSR-style edge-aware upscale + sharpen
+    float fsr_sharpness;    // 0.0 .. 1.0   how hard the sharpening pass works (FSR only)
+    int   output_height;    // 1080 (default) or 2160: the size of the picture the console is asked for
 };
 
 #ifdef __cplusplus

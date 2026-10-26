@@ -4,6 +4,20 @@ What has changed in the Xbox (UWP, Dev Mode) port of NocturneDecomp, newest firs
 The decompilation itself is the work of NearlyTRex (https://github.com/NearlyTRex/NocturneDecomp); this
 log covers only the Xbox port and its launcher.
 
+## Graphics options
+
+- **New Graphics tab in the launcher** (saved in `launcher.ini`, read by the game when it starts):
+  - **Output resolution, 1080p or 4K.** 1080p is the console's normal app window. 4K turns off the console's
+    layout scaling so the app gets the TV's real pixel size (3840x2160 on a 4K TV set to 4K). A change needs a
+    fresh window, so pressing Play after changing it restarts the app once and goes straight into the game.
+    The size actually received is written to `stderr.log` ("EGL surface WxH").
+  - **Upscaling, Off or FSR**, with a sharpness slider. FSR is an edge-aware upscale plus a contrast-adaptive
+    sharpen in the final blit shader, after AMD FidelityFX Super Resolution 1 (MIT licence); the sharpen step
+    is folded into the same pass. It only runs when the picture is being resized, and falls back to plain
+    scaling if the shader will not build (`stderr.log` says which).
+- The game's own picture size is unchanged: the engine's tables stop at 1600x1200, and a native 1920x1080 or
+  4K software render was not enabled because it could write past those limits and would be too slow on the CPU.
+
 ## Performance
 
 - **Optimised hot render code.** The console build compiles without optimisation by default, and

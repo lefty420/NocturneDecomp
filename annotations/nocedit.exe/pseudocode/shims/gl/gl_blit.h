@@ -47,6 +47,13 @@ int nocturne_gl_blit_quad(unsigned int texture);
 // target presented with nocturne_gl_blit_quad would come out upside down.
 int nocturne_gl_blit_quad_flipped(unsigned int texture);
 
+// The same quad through an FSR-style upscaler (edge-aware upscale plus a contrast-adaptive
+// sharpen; see gl_blit.cpp). `src_w` x `src_h` is the texture's size in texels, `flipped`
+// samples it bottom-up, and `sharpness` runs 0.0 (soft) to 1.0 (strongest). The texture
+// should have GL_LINEAR filtering. Returns 0 when the program could not be built, so the
+// caller can fall back to nocturne_gl_blit_quad.
+int nocturne_gl_blit_quad_fsr(unsigned int texture, int flipped, int src_w, int src_h, float sharpness);
+
 // Drop the program, buffer and vertex array, e.g. on context teardown.
 void nocturne_gl_blit_shutdown(void);
 

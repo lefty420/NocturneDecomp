@@ -25,8 +25,12 @@ bool save_settings(const std::filesystem::path &file, const NocturneLauncherSett
                   "stick_deadzone=%.2f\n"
                   "turn_rate=%.2f\n"
                   "look_rate=%.2f\n"
-                  "invert_look=%d\n",
-                  s.stick_deadzone, s.turn_rate, s.look_rate, s.invert_look ? 1 : 0);
+                  "invert_look=%d\n"
+                  "upscaler=%d\n"
+                  "fsr_sharpness=%.2f\n"
+                  "output_height=%d\n",
+                  s.stick_deadzone, s.turn_rate, s.look_rate, s.invert_look ? 1 : 0, s.upscaler ? 1 : 0,
+                  s.fsr_sharpness, s.output_height >= 1500 ? 2160 : 1080);
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
     const std::filesystem::path tmp = file.string() + ".tmp";

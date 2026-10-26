@@ -17,6 +17,9 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <thread>
 #include <cwctype>
 #include <fstream>
 #include <future>
@@ -316,6 +319,35 @@ extern "C" void nocturne_uwp_claim_back_button(void) {
             }));
     } catch (Platform::Exception ^) {
     }
+}
+
+// Output resolution. A UWP app on Xbox is given a 1920x1080 window whatever the TV is set to, and the console
+// scales that up. Turning layout scaling off hands the app the TV's real pixel size instead (3840x2160 on a 4K
+// TV set to 4K), which is what the ANGLE swap chain then follows. Has to happen before the window is created,
+// so the launcher applies it at start-up and asks for a restart when the player changes it. Returns 1 when the
+// system took the request, 0 when it did not, -1 when the UI thread did not answer in time.
+extern "C" int nocturne_uwp_set_output_height(int height) {
+    static std::atomic<int> state{-2};   // -2 pending, otherwise the result
+    state = -2;
+    const bool want_native = height >= 1500;
+    try {
+        CoreApplication::MainView->Dispatcher->RunAsync(
+            CoreDispatcherPriority::Normal, ref new DispatchedHandler([want_native]() {
+                int r = 0;
+                try {
+                    r = Windows::UI::ViewManagement::ApplicationViewScaling::TrySetDisableLayoutScaling(want_native) ? 1 : 0;
+                } catch (Platform::Exception ^) {
+                    r = 0;
+                }
+                state = r;
+            }));
+    } catch (Platform::Exception ^) {
+        return 0;
+    }
+    // Bounded wait: the game must still start if the UI thread is busy.
+    for (int i = 0; i < 150 && state.load() == -2; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const int r = state.load();
+    return r == -2 ? -1 : r;
 }
 
 // Asks the system to restart the app. Returns if the console refused (or does not support it); on success

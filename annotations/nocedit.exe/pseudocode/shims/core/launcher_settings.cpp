@@ -54,6 +54,9 @@ extern "C" void nocturne_launcher_settings_defaults(NocturneLauncherSettings *ou
     out->turn_rate = NOCTURNE_PAD_TURN_RATE;
     out->look_rate = NOCTURNE_PAD_LOOK_RATE;
     out->invert_look = NOCTURNE_PAD_INVERT_LOOK ? 1 : 0;
+    out->upscaler = 0;
+    out->fsr_sharpness = 0.5f;
+    out->output_height = 1080;
 }
 
 extern "C" int nocturne_launcher_settings_parse(const char *text, NocturneLauncherSettings *inout) {
@@ -78,6 +81,15 @@ extern "C" int nocturne_launcher_settings_parse(const char *text, NocturneLaunch
             inout->look_rate = clampf(f, 0.05f, 1.00f); applied++;
         } else if (key == "invert_look" && parse_bool(val, &b)) {
             inout->invert_look = b; applied++;
+        } else if (key == "upscaler") {
+            // "fsr" / "on" / 1 turn it on; "off" / "none" / 0 turn it off.
+            const std::string l = lower(val);
+            if (l == "fsr") { inout->upscaler = 1; applied++; }
+            else if (parse_bool(val, &b)) { inout->upscaler = b; applied++; }
+        } else if (key == "fsr_sharpness" && parse_float(val, &f)) {
+            inout->fsr_sharpness = clampf(f, 0.0f, 1.0f); applied++;
+        } else if (key == "output_height" && parse_float(val, &f)) {
+            inout->output_height = f >= 1500.0f ? 2160 : 1080; applied++;
         }
     }
     return applied;

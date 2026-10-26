@@ -19,6 +19,7 @@
 
 #include "gl/gl_api.h"
 #include "gl/gl_blit.h"
+#include "core/launcher_settings.h"
 #include "gl/gl_pixels.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -476,12 +477,36 @@ void present_to_window(GLuint texture, int fallback_w, int fallback_h, bool flip
     // their neighbours on 2), so blend instead.
     set_sampling(texture, viewport_is_integer_scale(vp_w, logical_w) ? GL_NEAREST : GL_LINEAR);
 
+    // Launcher option (Graphics tab): FSR-style upscaling. Only worth drawing when the picture is
+    // actually being resized; at 1:1 it would only sharpen.
+    static int fsr_state = -1;   // -1 unknown, 0 off, 1 on, 2 asked for but the shader would not build
+    const NocturneLauncherSettings *ls = nocturne_launcher_settings();
+    const bool want_fsr = ls->upscaler != 0 && fallback_w > 1 && fallback_h > 1 &&
+                          (vp_w != fallback_w || vp_h != fallback_h);
+
     // Every frame reaches the screen through this one quad — software mode
     // included, since nothing else draws there. A failure here is a black window
     // and it says so, rather than being carried by a second path that would hide
     // a program that stopped building.
-    const int drawn = flipped ? nocturne_gl_blit_quad_flipped(texture)
-                              : nocturne_gl_blit_quad(texture);
+    int drawn = 0;
+    if (want_fsr && fsr_state != 2) {
+        set_sampling(texture, GL_LINEAR);
+        drawn = nocturne_gl_blit_quad_fsr(texture, flipped ? 1 : 0, fallback_w, fallback_h, ls->fsr_sharpness);
+        if (!drawn) {
+            fsr_state = 2;
+            fprintf(stderr, "nocturne: FSR shader unavailable, using plain scaling\n");
+        } else if (fsr_state != 1) {
+            fsr_state = 1;
+            fprintf(stderr, "nocturne: FSR on, %dx%d -> %dx%d, sharpness %.2f\n", fallback_w, fallback_h, vp_w, vp_h,
+                    ls->fsr_sharpness);
+        }
+        if (!drawn) {
+            set_sampling(texture, viewport_is_integer_scale(vp_w, logical_w) ? GL_NEAREST : GL_LINEAR);
+        }
+    }
+    if (!drawn) {
+        drawn = flipped ? nocturne_gl_blit_quad_flipped(texture) : nocturne_gl_blit_quad(texture);
+    }
     if (!drawn) {
         DLOG_RL("render", 1, 600, "gl_present: present quad unavailable — frame not drawn");
     }

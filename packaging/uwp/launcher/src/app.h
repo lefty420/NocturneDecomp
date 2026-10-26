@@ -68,6 +68,7 @@ private:
     void close_import();
     void show_message(const std::string &title, const std::string &body);
     void change_setting(int row, int dir);
+    void change_graphics(int row, int dir);
     void save();
     void reset_settings();
 
@@ -77,6 +78,7 @@ private:
     void draw_play();
     void draw_files();
     void draw_settings();
+    void draw_graphics();
     void draw_about();
     void draw_story();
     void draw_cover(const Rect &panel_rect);
