@@ -72,6 +72,7 @@ struct Gfx::Impl {
     };
     Face faces[2];
     Gfx *owner = nullptr;
+    SDL_Texture *grain = nullptr;
 
     void clear_glyphs() {
         for (Face &f : faces)
@@ -96,7 +97,8 @@ struct Gfx::Impl {
 
     SizedFont &sized(FontFace face, int design_px, float ui_scale) {
         Face &f = faces[static_cast<int>(face)];
-        const int real = std::max(6, static_cast<int>(std::lround(design_px * ui_scale)));
+        static const float kFaceSize[2] = {1.0f, 1.14f};
+        const int real = std::max(6, static_cast<int>(std::lround(design_px * ui_scale * kFaceSize[static_cast<int>(face)])));
         auto it = f.sizes.find(real);
         if (it != f.sizes.end()) return it->second;
         SizedFont sf;
@@ -154,13 +156,15 @@ bool Gfx::init(SDL_Renderer *r, const std::string &fonts_dir) {
     impl_ = new Impl();
     impl_->owner = this;
     SDL_SetRenderDrawBlendMode(r_, SDL_BLENDMODE_BLEND);
-    const bool a = impl_->load_face(impl_->faces[0], fonts_dir + "/Poppins-Medium.ttf");
-    const bool b = impl_->load_face(impl_->faces[1], fonts_dir + "/Poppins-Bold.ttf");
+    // Body: Special Elite, a worn typewriter face. Headings: IM Fell Double Pica, an old-style print face.
+    const bool a = impl_->load_face(impl_->faces[0], fonts_dir + "/SpecialElite-Regular.ttf");
+    const bool b = impl_->load_face(impl_->faces[1], fonts_dir + "/IMFELLDoublePica-Regular.ttf");
     return a && b;
 }
 
 void Gfx::shutdown() {
     if (impl_) {
+        if (impl_->grain) SDL_DestroyTexture(impl_->grain);
         impl_->clear_glyphs();
         delete impl_;
         impl_ = nullptr;
@@ -189,7 +193,7 @@ void Gfx::clear_background() {
     SDL_SetRenderDrawColor(r_, 0, 0, 0, 255);
     SDL_RenderClear(r_);
     const Rect full{0, 0, kDesignW, kDesignH};
-    quad_gradient_v(full, Color(9, 11, 18), Color(20, 14, 24));
+    quad_gradient_v(full, Color(14, 10, 8), Color(26, 16, 12));
     // Soft vignette at the left and right edges.
     const Color dark(0, 0, 0, 150), clear(0, 0, 0, 0);
     const float m = 360;
@@ -227,7 +231,17 @@ std::vector<V> offset(const std::vector<V> &p, float d) {
 
 }  // namespace
 
-void Gfx::rrect(const Rect &r, float radius, Color c) {
+// The theme is square-cornered paper and card, not soft pills: rounded rectangles keep a fraction of the
+// radius they are asked for. circle() and ring() need the full radius and use the exact versions.
+static constexpr float kCornerScale = 0.22f;
+
+void Gfx::rrect(const Rect &r, float radius, Color c) { rrect_exact(r, std::max(2.0f, radius * kCornerScale), c); }
+
+void Gfx::rrect_outline(const Rect &r, float radius, float t, Color c) {
+    rrect_outline_exact(r, std::max(2.0f, radius * kCornerScale), t, c);
+}
+
+void Gfx::rrect_exact(const Rect &r, float radius, Color c) {
     if (c.a == 0 || r.w <= 0 || r.h <= 0) return;
     const std::vector<V> p = perimeter(r, radius);
     std::vector<SDL_Vertex> vs;
@@ -242,7 +256,7 @@ void Gfx::rrect(const Rect &r, float radius, Color c) {
     strip(r_, p, offset(p, f), c, Color(c.r, c.g, c.b, 0));
 }
 
-void Gfx::rrect_outline(const Rect &r, float radius, float t, Color c) {
+void Gfx::rrect_outline_exact(const Rect &r, float radius, float t, Color c) {
     if (c.a == 0) return;
     const float h = t * 0.5f;
     const std::vector<V> mid = perimeter(r, radius);
@@ -255,11 +269,11 @@ void Gfx::rrect_outline(const Rect &r, float radius, float t, Color c) {
 }
 
 void Gfx::circle(float cx, float cy, float rad, Color c) {
-    rrect({cx - rad, cy - rad, rad * 2, rad * 2}, rad, c);
+    rrect_exact({cx - rad, cy - rad, rad * 2, rad * 2}, rad, c);
 }
 
 void Gfx::ring(float cx, float cy, float rad, float t, Color c) {
-    rrect_outline({cx - rad, cy - rad, rad * 2, rad * 2}, rad, t, c);
+    rrect_outline_exact({cx - rad, cy - rad, rad * 2, rad * 2}, rad, t, c);
 }
 
 void Gfx::line(float x1, float y1, float x2, float y2, float t, Color c) {
@@ -335,10 +349,47 @@ SDL_Texture *Gfx::load_bmp(const std::string &path, int *w, int *h) {
     return tex;
 }
 
-void Gfx::image(SDL_Texture *tex, const Rect &dst) {
+void Gfx::image(SDL_Texture *tex, const Rect &dst) { image_tinted(tex, dst, Color(255, 255, 255, 255)); }
+
+void Gfx::image_tinted(SDL_Texture *tex, const Rect &dst, Color tint) {
     if (!tex) return;
     const SDL_FRect d{dst.x, dst.y, dst.w, dst.h};
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureColorMod(tex, tint.r, tint.g, tint.b);
+    SDL_SetTextureAlphaMod(tex, tint.a);
     SDL_RenderCopyF(r_, tex, nullptr, &d);
+    SDL_SetTextureColorMod(tex, 255, 255, 255);
+    SDL_SetTextureAlphaMod(tex, 255);
+}
+
+// Film grain: one small texture of random dark and light specks, made once and tiled over the screen.
+void Gfx::draw_grain(float strength) {
+    if (!impl_) return;
+    if (!impl_->grain) {
+        const int n = 256;
+        std::vector<Uint32> px(static_cast<size_t>(n) * n);
+        Uint32 s = 0x9E3779B9u;
+        for (Uint32 &p : px) {
+            s = s * 1664525u + 1013904223u;
+            const Uint32 v = (s >> 24) & 0xFFu;
+            const Uint32 a = v > 232 ? (v - 232) * 8 : (v < 14 ? (14 - v) * 8 : 0);   // sparse specks
+            const Uint32 lum = v > 200 ? 255u : 0u;
+            p = (a << 24) | (lum << 16) | (lum << 8) | lum;
+        }
+        impl_->grain = SDL_CreateTexture(r_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, n, n);
+        if (impl_->grain) {
+            SDL_UpdateTexture(impl_->grain, nullptr, px.data(), n * 4);
+            SDL_SetTextureBlendMode(impl_->grain, SDL_BLENDMODE_BLEND);
+            SDL_SetTextureScaleMode(impl_->grain, SDL_ScaleModeNearest);
+        }
+    }
+    if (!impl_->grain) return;
+    SDL_SetTextureAlphaMod(impl_->grain, static_cast<Uint8>(std::min(255.0f, 255.0f * strength)));
+    for (float y = 0; y < kDesignH; y += 256)
+        for (float x = 0; x < kDesignW; x += 256) {
+            const SDL_FRect d{x, y, 256, 256};
+            SDL_RenderCopyF(r_, impl_->grain, nullptr, &d);
+        }
 }
 
 }  // namespace nl

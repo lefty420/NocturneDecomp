@@ -78,6 +78,8 @@ private:
     void draw_play();
     void draw_files();
     void draw_settings();
+    void draw_backdrop();
+    void frame(const Rect &r);
     void draw_graphics();
     void draw_about();
     void draw_story();

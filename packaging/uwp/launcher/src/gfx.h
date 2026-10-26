@@ -37,7 +37,7 @@ enum class FontFace { Medium, Bold };
 
 class Gfx {
 public:
-    // `fonts_dir` holds Poppins-Medium.ttf and Poppins-Bold.ttf.
+    // `fonts_dir` holds SpecialElite-Regular.ttf and IMFELLDoublePica-Regular.ttf.
     bool init(SDL_Renderer *r, const std::string &fonts_dir);
     void shutdown();
 
@@ -46,7 +46,9 @@ public:
     float scale() const { return scale_; }
 
     void clear_background();   // the dark gradient with a soft vignette
-    void rrect(const Rect &r, float radius, Color c);
+    void rrect(const Rect &r, float radius, Color c);          // corners are squared off by the theme
+    void rrect_exact(const Rect &r, float radius, Color c);    // the radius as given (circles, pills)
+    void rrect_outline_exact(const Rect &r, float radius, float thickness, Color c);
     void rrect_outline(const Rect &r, float radius, float thickness, Color c);
     void circle(float cx, float cy, float radius, Color c);
     void ring(float cx, float cy, float radius, float thickness, Color c);
@@ -69,6 +71,8 @@ public:
     SDL_Texture *load_bmp(const std::string &path, int *w, int *h);
     // Draws `tex` scaled into `dst` (design-space rectangle).
     void image(SDL_Texture *tex, const Rect &dst);
+    void image_tinted(SDL_Texture *tex, const Rect &dst, Color tint);   // colour and alpha multiply the picture
+    void draw_grain(float strength);                                    // film grain over everything drawn so far
 
     SDL_Renderer *renderer() const { return r_; }
 

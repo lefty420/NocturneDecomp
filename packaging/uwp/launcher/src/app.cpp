@@ -13,18 +13,20 @@ namespace nl {
 
 namespace {
 
-// Palette: ink-dark surfaces, a crimson accent, warm off-white text.
-const Color kText(236, 233, 228);
-const Color kMuted(141, 147, 163);
-const Color kFaint(88, 94, 110);
-const Color kPanel(18, 22, 32, 235);
-const Color kPanel2(28, 33, 46);
-const Color kBorder(40, 47, 64);
-const Color kAccent(200, 50, 60);
-const Color kAccentSoft(228, 86, 94);
-const Color kOk(76, 175, 125);
-const Color kWarn(224, 164, 58);
-const Color kBad(224, 90, 90);
+// Palette: a 1930s case file. Dark sepia ink surfaces, brass rules, parchment text, blood-red accent.
+const Color kText(234, 222, 192);       // parchment
+const Color kMuted(168, 154, 124);      // faded tan
+const Color kFaint(104, 92, 72);
+const Color kPanel(24, 17, 13, 232);
+const Color kPanel2(40, 29, 22);
+const Color kBorder(112, 86, 48);       // tarnished brass
+const Color kAccent(160, 28, 30);       // blood red
+const Color kAccentSoft(214, 66, 56);
+const Color kOk(124, 160, 96);
+const Color kWarn(214, 164, 70);
+const Color kBad(212, 78, 62);
+const Color kPaper(222, 206, 168);      // aged paper, for the selected tab
+const Color kInk(38, 27, 20);           // ink on that paper
 
 constexpr float kMarginX = 96;
 constexpr float kContentY = 250;
@@ -320,10 +322,26 @@ void App::update(float dt) {
 // Drawing helpers
 // ---------------------------------------------------------------------------------
 
-void App::panel(const Rect &r, const char *title) {
+// A dossier card: dark card, brass double rule, and corner brackets.
+void App::frame(const Rect &r) {
     g_.rrect(r, 28, kPanel);
-    g_.rrect_outline(r, 28, 1.5f, kBorder);
-    if (title) g_.text(r.x + 40, r.y + 32, title, 22, kMuted, FontFace::Bold, 3.0f);
+    g_.rrect_outline(r, 28, 2.0f, kBorder);
+    g_.rrect_outline(r.inset(9), 28, 1.0f, kBorder.alpha(0.55f));
+    const float L = 26, t = 3.0f;
+    const Color c = kAccentSoft.alpha(0.85f);
+    const float x0 = r.x + 3, y0 = r.y + 3, x1 = r.right() - 3, y1 = r.bottom() - 3;
+    g_.line(x0, y0, x0 + L, y0, t, c);  g_.line(x0, y0, x0, y0 + L, t, c);
+    g_.line(x1, y0, x1 - L, y0, t, c);  g_.line(x1, y0, x1, y0 + L, t, c);
+    g_.line(x0, y1, x0 + L, y1, t, c);  g_.line(x0, y1, x0, y1 - L, t, c);
+    g_.line(x1, y1, x1 - L, y1, t, c);  g_.line(x1, y1, x1, y1 - L, t, c);
+}
+
+void App::panel(const Rect &r, const char *title) {
+    frame(r);
+    if (title) {
+        g_.text(r.x + 40, r.y + 26, title, 24, kAccentSoft, FontFace::Bold, 4.0f);
+        g_.line(r.x + 40, r.y + 62, r.x + 40 + 84, r.y + 62, 2.0f, kBorder);
+    }
 }
 
 void App::button(const Rect &r, const std::string &label, bool focused, bool primary, bool enabled) {
@@ -401,10 +419,16 @@ std::vector<std::string> App::wrap(const std::string &s, float width, int px) {
 // ---------------------------------------------------------------------------------
 
 void App::draw_header() {
-    g_.text(kMarginX, 52, "NOCTURNE", 58, kText, FontFace::Bold, 10.0f);
-    g_.rrect({kMarginX + 4, 124, 64, 4}, 2, kAccent);
-    g_.text_right(kDesignW - kMarginX, 66, "Xbox port", 26, kMuted);
-    g_.text_right(kDesignW - kMarginX, 98, "Based on NocturneDecomp by NearlyTRex", 20, kFaint);
+    g_.text(kMarginX + 3, 34, "NOCTURNE", 84, Color(0, 0, 0, 160), FontFace::Bold, 12.0f);   // ink shadow
+    g_.text(kMarginX, 30, "NOCTURNE", 84, kText, FontFace::Bold, 12.0f);
+    g_.line(kMarginX, 130, kMarginX + 470, 130, 2.0f, kBorder);
+    g_.line(kMarginX, 137, kMarginX + 470, 137, 4.0f, kAccent);
+    // A rubber-stamp for the port, and the credit line.
+    const Rect stamp{kDesignW - kMarginX - 260, 36, 260, 58};
+    g_.rrect_outline(stamp, 8, 3.0f, kAccentSoft.alpha(0.9f));
+    g_.rrect_outline(stamp.inset(7), 4, 1.0f, kAccentSoft.alpha(0.6f));
+    g_.text_center(stamp.cx(), stamp.y + 8, "XBOX PORT", 34, kAccentSoft, FontFace::Bold, 5.0f);
+    g_.text_right(kDesignW - kMarginX, 106, "Based on NocturneDecomp by NearlyTRex", 21, kMuted);
 }
 
 void App::draw_tabs() {
@@ -421,11 +445,14 @@ void App::draw_tabs() {
     sel_w = ws[tab_];
     tab_x_.set(sel_x);
     tab_w_.set(sel_w);
-    const Rect pill{tab_x_.v, y, tab_w_.v, h};
-    g_.rrect(pill, h * 0.5f, in_tabs_ ? kAccent : kAccent.alpha(0.85f));
-    if (in_tabs_) g_.rrect_outline(pill, h * 0.5f, 3.0f, kText);
+    // The tab row sits on a brass rule; the selected tab is a sheet of paper standing on it.
+    g_.line(kMarginX, y + h + 2, kDesignW - kMarginX, y + h + 2, 2.0f, kBorder);
+    const Rect pill{tab_x_.v, y - 4, tab_w_.v, h + 6};
+    g_.rrect(pill, 14, in_tabs_ ? kPaper : kPaper.mix(kPanel2, 0.15f));
+    g_.rrect({pill.x, pill.y, pill.w, 6}, 3, kAccent);
+    if (in_tabs_) g_.rrect_outline(pill, 14, 3.0f, kAccentSoft);
     for (int i = 0; i < kTabCount; ++i) {
-        g_.text_center(xs[i] + ws[i] * 0.5f, y + 13, kTabNames[i], 28, i == tab_ ? kText : kMuted, FontFace::Bold);
+        g_.text_center(xs[i] + ws[i] * 0.5f, y + 10, kTabNames[i], 30, i == tab_ ? kInk : kMuted, FontFace::Bold);
     }
     // Shoulder-button hints either side of the tabs.
     float hx = kMarginX;
@@ -464,8 +491,7 @@ void App::draw_play() {
     if (!cover_tried_) { cover_tried_ = true; cover_ = load_cover(); }
     const bool has_cover = cover_ != nullptr;
     if (has_cover) {
-        g_.rrect(right, 28, kPanel);
-        g_.rrect_outline(right, 28, 1.5f, kBorder);
+        frame(right);
         draw_cover(right);
     } else {
         panel(right, "AT A GLANCE");
@@ -822,7 +848,7 @@ void App::draw_about() {
                                   "Nothing is downloaded, and nothing is sent anywhere.");
     para("Your files live here", root_.string());
     para("Built with", "SDL2 (zlib), ANGLE (BSD), FreeType (FreeType License), FFmpeg (LGPL 2.1+), "
-                       "stb_truetype (public domain) and the Poppins typeface (SIL Open Font License 1.1).");
+                       "stb_truetype (public domain), the Special Elite typeface (Apache 2.0) and the IM Fell Double Pica typeface (SIL Open Font License 1.1).");
 }
 
 void App::draw_modal() {
@@ -901,8 +927,22 @@ void App::draw_toast() {
     g_.text_center(r.cx(), r.y + 12, toast_text_, 26, kText.alpha(a), FontFace::Bold);
 }
 
-void App::draw() {
+// Box art, dimmed, behind everything; then grain and a heavy vignette so the cards stay readable.
+void App::draw_backdrop() {
     g_.clear_background();
+    if (!cover_tried_) { cover_tried_ = true; cover_ = load_cover(); }
+    if (cover_ && cover_w_ > 0 && cover_h_ > 0) {
+        const float k = static_cast<float>(kDesignW) / cover_w_;           // fill the width; crop top and bottom
+        const float h = cover_h_ * k;
+        g_.image_tinted(cover_, {0, (kDesignH - h) * 0.38f, static_cast<float>(kDesignW), h}, Color(200, 170, 150, 46));
+    }
+    g_.quad_gradient_v({0, 0, static_cast<float>(kDesignW), 360}, Color(8, 5, 4, 200), Color(8, 5, 4, 0));
+    g_.quad_gradient_v({0, kDesignH - 260.0f, static_cast<float>(kDesignW), 260}, Color(8, 5, 4, 0), Color(8, 5, 4, 230));
+    g_.draw_grain(0.6f);
+}
+
+void App::draw() {
+    draw_backdrop();
     draw_header();
     draw_tabs();
     switch (tab_) {

@@ -176,6 +176,7 @@ jobs:
             Get-ChildItem vclibs -Filter *.dll | ForEach-Object { Copy-Item $_.FullName $P; "runtime: $($_.Name)" | Out-File $log -Append }
           } else { "VCLibs appx NOT FOUND" | Out-File $log -Append }
           Copy-Item packaging\uwp\launcher\assets\fonts\*.ttf "$P\fonts"
+          Copy-Item packaging\uwp\launcher\assets\fonts\*.txt "$P\fonts"
           Copy-Item packaging\uwp\launcher\assets\cover.bmp $P
           python -m pip install -q pillow 2>&1 | Out-Null
           python .github\scripts\make_logos.py "$P\Assets" packaging\uwp\assets\icon.png

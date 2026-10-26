@@ -4,6 +4,13 @@ What has changed in the Xbox (UWP, Dev Mode) port of NocturneDecomp, newest firs
 The decompilation itself is the work of NearlyTRex (https://github.com/NearlyTRex/NocturneDecomp); this
 log covers only the Xbox port and its launcher.
 
+## Launcher look
+
+- **1930s pulp-horror theme.** The launcher is restyled as a case file: sepia-black cards with brass double
+  rules and red corner brackets, a paper tab for the selected page, a rubber-stamp "Xbox port" mark, film grain,
+  and the box art dimmed behind everything. Headings use IM Fell Double Pica (OFL) and body text Special Elite
+  (Apache 2.0); both are bundled with their licences, replacing Poppins. Layout, tabs and controls are unchanged.
+
 ## Graphics options
 
 - **New Graphics tab in the launcher** (saved in `launcher.ini`, read by the game when it starts):
