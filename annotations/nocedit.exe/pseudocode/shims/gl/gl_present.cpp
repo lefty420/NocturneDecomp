@@ -144,8 +144,30 @@ bool ensure_texture(int width, int height, GLenum format, GLenum type) {
 // picture it started at, just with a bigger black border. Since the window can
 // now be any size (fullscreen, borderless, or a resolution the user picked),
 // filling it matters more than exact pixel multiples.
+// Screen shape (launcher Graphics tab): when the screen is wider than the game's picture, the picture may
+// be stretched or zoomed to fill it instead of leaving bars. 0 keeps the bars.
+bool shape_fills(int drawable_w, int drawable_h, int logical_w, int logical_h) {
+    if (nocturne_launcher_settings()->screen_shape == 0) return false;
+    if (drawable_w <= 0 || drawable_h <= 0 || logical_w <= 0 || logical_h <= 0) return false;
+    const double screen = (double)drawable_w / (double)drawable_h;
+    const double picture = (double)logical_w / (double)logical_h;
+    return screen > picture + 0.02;
+}
+
 void compute_viewport(int drawable_w, int drawable_h, int logical_w, int logical_h,
                       int *out_x, int *out_y, int *out_w, int *out_h) {
+    if (shape_fills(drawable_w, drawable_h, logical_w, logical_h)) {
+        if (nocturne_launcher_settings()->screen_shape == 3) {
+            // Zoom: fill the width, let the top and bottom run off the screen.
+            *out_w = drawable_w;
+            *out_h = (int)((double)drawable_w * (double)logical_h / (double)logical_w + 0.5);
+            *out_x = 0;
+            *out_y = (drawable_h - *out_h) / 2;
+        } else {
+            *out_x = 0; *out_y = 0; *out_w = drawable_w; *out_h = drawable_h;   // smart stretch and stretch
+        }
+        return;
+    }
     double scale = 1.0;
     if (logical_w > 0 && logical_h > 0) {
         double scale_x = (double)drawable_w / (double)logical_w;
@@ -475,7 +497,9 @@ void present_to_window(GLuint texture, int fallback_w, int fallback_h, bool flip
     // Nearest keeps whole-multiple scaling crisp; at a fractional scale it makes
     // pixel sizes visibly uneven (some source pixels land on 1 screen pixel,
     // their neighbours on 2), so blend instead.
-    set_sampling(texture, viewport_is_integer_scale(vp_w, logical_w) ? GL_NEAREST : GL_LINEAR);
+    const bool warp = nocturne_launcher_settings()->screen_shape == 1 &&
+                      shape_fills(drawable_w, drawable_h, logical_w, logical_h);
+    set_sampling(texture, (!warp && viewport_is_integer_scale(vp_w, logical_w)) ? GL_NEAREST : GL_LINEAR);
 
     // Launcher option (Graphics tab): FSR-style upscaling. Only worth drawing when the picture is
     // actually being resized; at 1:1 it would only sharpen.
@@ -488,6 +512,7 @@ void present_to_window(GLuint texture, int fallback_w, int fallback_h, bool flip
     // included, since nothing else draws there. A failure here is a black window
     // and it says so, rather than being carried by a second path that would hide
     // a program that stopped building.
+    nocturne_gl_blit_set_warp(warp);
     int drawn = 0;
     if (want_fsr && fsr_state != 2) {
         set_sampling(texture, GL_LINEAR);
@@ -501,12 +526,13 @@ void present_to_window(GLuint texture, int fallback_w, int fallback_h, bool flip
                     ls->fsr_sharpness);
         }
         if (!drawn) {
-            set_sampling(texture, viewport_is_integer_scale(vp_w, logical_w) ? GL_NEAREST : GL_LINEAR);
+            set_sampling(texture, (!warp && viewport_is_integer_scale(vp_w, logical_w)) ? GL_NEAREST : GL_LINEAR);
         }
     }
     if (!drawn) {
         drawn = flipped ? nocturne_gl_blit_quad_flipped(texture) : nocturne_gl_blit_quad(texture);
     }
+    nocturne_gl_blit_set_warp(0);
     if (!drawn) {
         DLOG_RL("render", 1, 600, "gl_present: present quad unavailable — frame not drawn");
     }

@@ -54,6 +54,11 @@ int nocturne_gl_blit_quad_flipped(unsigned int texture);
 // caller can fall back to nocturne_gl_blit_quad.
 int nocturne_gl_blit_quad_fsr(unsigned int texture, int flipped, int src_w, int src_h, float sharpness);
 
+// While on, the two quads above (and the FSR one) are drawn as a bent strip for "smart stretch": the
+// middle of the screen close to true proportions, the sides stretched more. Only for the final present
+// to the window; the caller turns it off again straight after.
+void nocturne_gl_blit_set_warp(int on);
+
 // Drop the program, buffer and vertex array, e.g. on context teardown.
 void nocturne_gl_blit_shutdown(void);
 

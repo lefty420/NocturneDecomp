@@ -57,6 +57,7 @@ extern "C" void nocturne_launcher_settings_defaults(NocturneLauncherSettings *ou
     out->upscaler = 0;
     out->fsr_sharpness = 0.5f;
     out->output_height = 1080;
+    out->screen_shape = 0;
 }
 
 extern "C" int nocturne_launcher_settings_parse(const char *text, NocturneLauncherSettings *inout) {
@@ -90,6 +91,8 @@ extern "C" int nocturne_launcher_settings_parse(const char *text, NocturneLaunch
             inout->fsr_sharpness = clampf(f, 0.0f, 1.0f); applied++;
         } else if (key == "output_height" && parse_float(val, &f)) {
             inout->output_height = f >= 1500.0f ? 2160 : 1080; applied++;
+        } else if (key == "screen_shape" && parse_float(val, &f)) {
+            inout->screen_shape = f < 0.5f ? 0 : (f < 1.5f ? 1 : (f < 2.5f ? 2 : 3)); applied++;
         }
     }
     return applied;

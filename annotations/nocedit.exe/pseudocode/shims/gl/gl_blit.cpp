@@ -74,6 +74,42 @@ const GLfloat kQuad[32] = {
 const int kQuadTopDown  = 0;
 const int kQuadBottomUp = 4;
 
+// Smart stretch (launcher Graphics tab, "Screen shape"). A 4:3 picture on a 16:9 screen is drawn as a
+// triangle strip of narrow columns instead of one quad, with the picture's x coordinate bent so that the
+// middle of the screen shows the game at close to its true proportions and the sides are stretched
+// progressively more. With x in -1..1 across the screen the source position is
+//     u(x) = mix(x, (4x - x^3) / 3, t)
+// which reaches the picture's edge exactly at the screen's edge (u = x at t = 0, the plain quad). With
+// t = 0.7 the middle is drawn about 8% wider than true and the outermost edge about 2.3 times wider.
+// Linear interpolation across 48 columns follows the curve closely. Built once, appended to the same buffer after the plain quads.
+const int   kWarpColumns = 48;
+const float kWarpStrength = 0.7f;
+const int   kWarpVerts = 2 * (kWarpColumns + 1);
+const int   kWarpTopDown  = 8;
+const int   kWarpBottomUp = 8 + kWarpVerts;
+bool        g_warp = false;
+
+// One draw of the picture: the plain quad, or the warped strip when smart stretch is on.
+void draw_picture(int first) {
+    if (g_warp) {
+        gl.DrawArrays(GL_TRIANGLE_STRIP, first == kQuadBottomUp ? kWarpBottomUp : kWarpTopDown, kWarpVerts);
+    } else {
+        gl.DrawArrays(GL_TRIANGLE_STRIP, first, 4);
+    }
+}
+
+void build_warp(GLfloat *out, bool flipped) {
+    for (int i = 0; i <= kWarpColumns; ++i) {
+        const float x = -1.0f + 2.0f * (float)i / (float)kWarpColumns;
+        const float w = (4.0f * x - x * x * x) / 3.0f;
+        const float u = 0.5f * ((1.0f - kWarpStrength) * x + kWarpStrength * w) + 0.5f;
+        const float vt = flipped ? 1.0f : 0.0f, vb = flipped ? 0.0f : 1.0f;
+        GLfloat *p = out + i * 8;
+        p[0] = x; p[1] =  1.0f; p[2] = u; p[3] = vt;
+        p[4] = x; p[5] = -1.0f; p[6] = u; p[7] = vb;
+    }
+}
+
 
 // -----------------------------------------------------------------------------
 // FSR-style upscale (an addition for the Xbox port; the shipped game has none)
@@ -277,7 +313,11 @@ bool build_program() {
 
     gl.BindVertexArray(g_vao);
     gl.BindBuffer(GL_ARRAY_BUFFER, g_vbo);
-    gl.BufferData(GL_ARRAY_BUFFER, (GLsizeiptr)sizeof(kQuad), kQuad, GL_STATIC_DRAW);
+    GLfloat all[32 + 2 * kWarpVerts * 4];
+    for (int i = 0; i < 32; ++i) all[i] = kQuad[i];
+    build_warp(all + 32, false);
+    build_warp(all + 32 + kWarpVerts * 4, true);
+    gl.BufferData(GL_ARRAY_BUFFER, (GLsizeiptr)sizeof(all), all, GL_STATIC_DRAW);
 
     const GLsizei stride = (GLsizei)(4 * sizeof(GLfloat));
     gl.EnableVertexAttribArray((GLuint)g_attr_pos);
@@ -327,7 +367,7 @@ int blit_quad(unsigned int texture, int first) {
     gl.BindTexture(GL_TEXTURE_2D, (GLuint)texture);
 
     gl.BindVertexArray(g_vao);
-    gl.DrawArrays(GL_TRIANGLE_STRIP, first, 4);
+    draw_picture(first);
 
     gl.BindVertexArray((GLuint)prev_array);
     gl.UseProgram((GLuint)prev_program);
@@ -359,7 +399,7 @@ int blit_quad_fsr(unsigned int texture, int first, int src_w, int src_h, float s
     gl.BindTexture(GL_TEXTURE_2D, (GLuint)texture);
 
     gl.BindVertexArray(g_vao);
-    gl.DrawArrays(GL_TRIANGLE_STRIP, first, 4);
+    draw_picture(first);
 
     gl.BindVertexArray((GLuint)prev_array);
     gl.UseProgram((GLuint)prev_program);
@@ -384,6 +424,8 @@ extern "C" int nocturne_gl_blit_quad_fsr(unsigned int texture, int flipped, int 
     const float contrast = 0.25f + 0.75f * s * s;
     return blit_quad_fsr(texture, flipped ? kQuadBottomUp : kQuadTopDown, src_w, src_h, contrast);
 }
+
+extern "C" void nocturne_gl_blit_set_warp(int on) { g_warp = on != 0; }
 
 extern "C" void nocturne_gl_blit_shutdown(void) {
     if (g_fsr_program != 0 && gl.DeleteProgram != nullptr) gl.DeleteProgram(g_fsr_program);
@@ -410,6 +452,7 @@ extern "C" void nocturne_gl_blit_shutdown(void) {
 
 extern "C" int nocturne_gl_blit_quad(unsigned int texture) { (void)texture; return 0; }
 extern "C" int nocturne_gl_blit_quad_flipped(unsigned int t) { (void)t; return 0; }
+extern "C" void nocturne_gl_blit_set_warp(int on) { (void)on; }
 extern "C" int nocturne_gl_blit_quad_fsr(unsigned int t, int f, int w, int h, float s) { (void)t; (void)f; (void)w; (void)h; (void)s; return 0; }
 extern "C" void nocturne_gl_blit_shutdown(void) {}
 

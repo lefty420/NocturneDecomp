@@ -184,22 +184,25 @@ void App::reset_settings() {
     settings_.upscaler = keep.upscaler;
     settings_.fsr_sharpness = keep.fsr_sharpness;
     settings_.output_height = keep.output_height;
+    settings_.screen_shape = keep.screen_shape;
     save();
 }
 
 void App::change_graphics(int row, int dir) {
     switch (row) {
-        case 0: settings_.output_height = settings_.output_height >= 1500 ? 1080 : 2160; break;
-        case 1: settings_.upscaler = settings_.upscaler ? 0 : 1; break;
-        case 2:
+        case 0: settings_.screen_shape = (settings_.screen_shape + (dir < 0 ? 3 : 1)) % 4; break;
+        case 1: settings_.output_height = settings_.output_height >= 1500 ? 1080 : 2160; break;
+        case 2: settings_.upscaler = settings_.upscaler ? 0 : 1; break;
+        case 3:
             settings_.fsr_sharpness = clampf(std::round((settings_.fsr_sharpness + dir * 0.1f) * 10) / 10, 0.0f, 1.0f);
             break;
-        case 3: {
+        case 4: {
             NocturneLauncherSettings d;
             nocturne_launcher_settings_defaults(&d);
             settings_.upscaler = d.upscaler;
             settings_.fsr_sharpness = d.fsr_sharpness;
             settings_.output_height = d.output_height;
+            settings_.screen_shape = d.screen_shape;
             break;
         }
         default: return;
@@ -223,7 +226,7 @@ int App::content_rows() const {
         case 0: return 1;
         case 1: return static_cast<int>(providers_.size()) + 1;
         case 2: return 5;
-        case 3: return 4;
+        case 3: return 5;
         default: return 0;
     }
 }
@@ -296,11 +299,14 @@ void App::handle(Input in) {
             }
             break;
         case 3:
-            if (focus_ == 2) {
-                if (in == Input::Left) change_graphics(2, -1);
-                else if (in == Input::Right || in == Input::Accept) change_graphics(2, +1);
-            } else if (focus_ == 3) {
-                if (in == Input::Accept) change_graphics(3, 0);
+            if (focus_ == 3) {
+                if (in == Input::Left) change_graphics(3, -1);
+                else if (in == Input::Right || in == Input::Accept) change_graphics(3, +1);
+            } else if (focus_ == 4) {
+                if (in == Input::Accept) change_graphics(4, 0);
+            } else if (focus_ == 0) {
+                if (in == Input::Left) change_graphics(0, -1);
+                else if (in == Input::Right || in == Input::Accept) change_graphics(0, +1);
             } else if (in == Input::Accept || in == Input::Left || in == Input::Right) {
                 change_graphics(focus_, 0);
             }
@@ -470,7 +476,7 @@ void App::draw_footer() {
         else hint(x, y, "B", kBad, "Cancel");
     } else {
         hint(x, y, "A", kOk, "Select");
-        if ((tab_ == 2 && !in_tabs_ && focus_ <= 2) || (tab_ == 3 && !in_tabs_ && focus_ == 2)) hint(x, y, "<>", kWarn, "Adjust");
+        if ((tab_ == 2 && !in_tabs_ && focus_ <= 2) || (tab_ == 3 && !in_tabs_ && (focus_ == 0 || focus_ == 3))) hint(x, y, "<>", kWarn, "Adjust");
         hint(x, y, "B", kBad, "Back to tabs");
         hint(x, y, "LB", kText, "");
         x -= 44 - 6;
@@ -545,7 +551,7 @@ void App::draw_play() {
                 const Rect t{left.x + 40 + i * (tw + 24), top, tw, 150};
                 g_.rrect(t, 22, kPanel2);
                 g_.text(t.x + 24, t.y + 24, labs[i], 20, kMuted, FontFace::Bold, 2.5f);
-                g_.text(t.x + 24, t.y + 70, g_.fit(vals[i], t.w - 48, i == 2 ? 26 : 44, FontFace::Bold), i == 2 ? 26 : 44, cols[i], FontFace::Bold);
+                g_.text(t.x + 24, t.y + 70, g_.fit(vals[i], t.w - 48, i == 2 ? 26 : 44, FontFace::Medium), i == 2 ? 26 : 44, cols[i], FontFace::Medium);
             }
         }
     }
@@ -654,7 +660,7 @@ void App::draw_settings() {
             g_.rrect_outline(row, 22, 3.0f, kText);
         }
         g_.text(row.x + 28, row.y + 14, sl[i].label, 30, kText);
-        g_.text_right(row.right() - 28, row.y + 14, sl[i].text, 30, focused ? kAccentSoft : kMuted, FontFace::Bold);
+        g_.text_right(row.right() - 28, row.y + 14, sl[i].text, 30, focused ? kAccentSoft : kMuted, FontFace::Medium);
         const Rect track{row.x + 28, row.y + 80, row.w - 56, 10};
         g_.rrect(track, 5, kFaint.alpha(0.5f));
         const float f = (sl[i].value - sl[i].lo) / (sl[i].hi - sl[i].lo);
@@ -755,31 +761,48 @@ void App::draw_graphics() {
         const Rect c1{c2.x - gap - cw, row.y + 22, cw, ch};
         g_.rrect(c1, 26, second ? kFaint.alpha(0.45f) : kAccent);
         g_.rrect(c2, 26, second ? kAccent : kFaint.alpha(0.45f));
-        g_.text_center(c1.cx(), c1.y + 10, a, 28, second ? kMuted : kText, FontFace::Bold);
-        g_.text_center(c2.cx(), c2.y + 10, b, 28, second ? kText : kMuted, FontFace::Bold);
+        g_.text_center(c1.cx(), c1.y + 12, a, 26, second ? kMuted : kText, FontFace::Medium);
+        g_.text_center(c2.cx(), c2.y + 12, b, 26, second ? kText : kMuted, FontFace::Medium);
     };
     float y = left.y + 84;
-    choice_row(y, 0, "Output resolution", "1080p", "4K", uhd);
+    {   // Screen shape: four choices in one row.
+        const bool focused = !in_tabs_ && tab_ == 3 && focus_ == 0;
+        const Rect row{left.x + 24, y, left.w - 48, 96};
+        if (focused) { g_.rrect(row, 22, kPanel2.mix(kAccent, 0.25f)); g_.rrect_outline(row, 22, 3.0f, kText); }
+        g_.text(row.x + 28, row.y + 30, "Screen shape", 30, kText);
+        const char *names[4] = {"4:3", "Smart", "Stretch", "Zoom"};
+        const float cw = 124, ch = 52, gap = 8;
+        float cx = row.right() - 28 - 4 * cw - 3 * gap;
+        for (int i = 0; i < 4; ++i) {
+            const Rect c{cx, row.y + 22, cw, ch};
+            const bool on = settings_.screen_shape == i;
+            g_.rrect(c, 26, on ? kAccent : kFaint.alpha(0.45f));
+            g_.text_center(c.cx(), c.y + 12, names[i], 24, on ? kText : kMuted, FontFace::Medium);
+            cx += cw + gap;
+        }
+    }
     y += 108;
-    choice_row(y, 1, "Upscaling", "Off", "FSR", settings_.upscaler != 0);
+    choice_row(y, 1, "Output resolution", "1080p", "4K", uhd);
+    y += 108;
+    choice_row(y, 2, "Upscaling", "Off", "FSR", settings_.upscaler != 0);
     y += 108;
     {
-        const bool focused = !in_tabs_ && tab_ == 3 && focus_ == 2;
+        const bool focused = !in_tabs_ && tab_ == 3 && focus_ == 3;
         const bool on = settings_.upscaler != 0;
-        const Rect row{left.x + 24, y, left.w - 48, 120};
+        const Rect row{left.x + 24, y, left.w - 48, 108};
         if (focused) { g_.rrect(row, 22, kPanel2.mix(kAccent, 0.25f)); g_.rrect_outline(row, 22, 3.0f, kText); }
-        g_.text(row.x + 28, row.y + 14, "FSR sharpness", 30, on ? kText : kFaint);
-        g_.text_right(row.right() - 28, row.y + 14, pct(settings_.fsr_sharpness), 30,
-                      focused ? kAccentSoft : (on ? kMuted : kFaint), FontFace::Bold);
-        const Rect track{row.x + 28, row.y + 80, row.w - 56, 10};
+        g_.text(row.x + 28, row.y + 10, "FSR sharpness", 30, on ? kText : kFaint);
+        g_.text_right(row.right() - 28, row.y + 10, pct(settings_.fsr_sharpness), 30,
+                      focused ? kAccentSoft : (on ? kMuted : kFaint), FontFace::Medium);
+        const Rect track{row.x + 28, row.y + 72, row.w - 56, 10};
         g_.rrect(track, 5, kFaint.alpha(0.5f));
         const float f = settings_.fsr_sharpness;
         g_.rrect({track.x, track.y, std::max(10.0f, track.w * f), track.h}, 5, on ? kAccent : kFaint);
         g_.circle(track.x + track.w * f, track.cy(), focused ? 17.0f : 13.0f, focused ? kText : kMuted);
-        y += 132;
+        y += 116;
     }
     {
-        const bool focused = !in_tabs_ && tab_ == 3 && focus_ == 3;
+        const bool focused = !in_tabs_ && tab_ == 3 && focus_ == 4;
         button({left.x + 40, y + 4, 380, 72}, "Reset to defaults", focused, false);
     }
 
@@ -791,12 +814,11 @@ void App::draw_graphics() {
         }
         ty += 14;
     };
-    body("Output resolution is the picture size the game asks your console for. 4K only helps on a 4K TV. "
-         "After you change it, Play restarts the app once.", kMuted);
-    body("FSR is an edge-aware upscaler with a sharpening pass, in the spirit of AMD FidelityFX Super Resolution 1. "
-         "It makes a low in-game resolution look closer to a high one.", kMuted);
-    body("The game's own picture size is still set in its Graphics Options and stops at 1600 x 1200.", kMuted);
-    if (uhd && settings_.upscaler) body("4K with FSR is the heaviest mix. If the frame rate drops, turn FSR off or go back to 1080p.", kWarn);
+    body("Screen shape is for wide TVs. 4:3 keeps the game's own shape with bars at the sides. Smart stretches "
+         "the edges more than the middle. Stretch fills evenly. Zoom fills and trims the top and bottom.", kMuted);
+    body("4K only helps on a 4K TV. Play restarts the app once after you change it.", kMuted);
+    body("FSR sharpens and smooths a picture that is being enlarged.", kMuted);
+    if (uhd && settings_.upscaler) body("4K with FSR is the heaviest mix. If the frame rate drops, turn FSR off.", kWarn);
 }
 
 void App::draw_story() {

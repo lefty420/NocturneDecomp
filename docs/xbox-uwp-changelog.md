@@ -22,6 +22,11 @@ log covers only the Xbox port and its launcher.
     sharpen in the final blit shader, after AMD FidelityFX Super Resolution 1 (MIT licence); the sharpen step
     is folded into the same pass. It only runs when the picture is being resized, and falls back to plain
     scaling if the shader will not build (`stderr.log` says which).
+- **Screen shape** (same tab) for wide TVs: 4:3 (bars at the sides, the default), Smart (the middle of the picture keeps
+  near-true proportions and the edges are stretched progressively more, drawn as a bent strip of 48 columns),
+  Stretch (fills evenly), and Zoom (fills the width and crops the top and bottom). Done in the final present, so
+  it works with FSR. True widescreen rendering (a wider view instead of a stretched one) is not done: the
+  engine derives its picture width from the height as 4:3 in its camera set-up.
 - The game's own picture size is unchanged: the engine's tables stop at 1600x1200, and a native 1920x1080 or
   4K software render was not enabled because it could write past those limits and would be too slow on the CPU.
 

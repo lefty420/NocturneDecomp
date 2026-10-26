@@ -205,24 +205,27 @@ int main(int argc, char **argv) {
 
         // Graphics tab: 4K, FSR on, sharpness up; the reset on the controller page must leave these alone.
         app.debug_select_tab(3);
-        app.handle(Input::Accept);                                      // output 1080p -> 4K
+        app.handle(Input::Right);                                       // screen shape 4:3 -> Smart
         app.debug_set_focus(1);
-        app.handle(Input::Accept);                                      // FSR on
+        app.handle(Input::Accept);                                      // output 1080p -> 4K
         app.debug_set_focus(2);
+        app.handle(Input::Accept);                                      // FSR on
+        app.debug_set_focus(3);
         for (int i = 0; i < 3; ++i) app.handle(Input::Right);           // sharpness 50% -> 80%
         shot.save(app, "10b_graphics");
         s = load_settings(data / "launcher.ini");
         EXPECT(s.output_height == 2160 && s.upscaler == 1 && std::fabs(s.fsr_sharpness - 0.8f) < 1e-4f);
+        EXPECT(s.screen_shape == 1);
         app.debug_select_tab(2);
         app.debug_set_focus(4);
         app.handle(Input::Accept);                                      // controller reset
         s = load_settings(data / "launcher.ini");
-        EXPECT(s.output_height == 2160 && s.upscaler == 1);
+        EXPECT(s.output_height == 2160 && s.upscaler == 1 && s.screen_shape == 1);
         app.debug_select_tab(3);
-        app.debug_set_focus(3);
+        app.debug_set_focus(4);
         app.handle(Input::Accept);                                      // graphics reset
         s = load_settings(data / "launcher.ini");
-        EXPECT(s.output_height == 1080 && s.upscaler == 0 && std::fabs(s.fsr_sharpness - 0.5f) < 1e-4f);
+        EXPECT(s.output_height == 1080 && s.upscaler == 0 && std::fabs(s.fsr_sharpness - 0.5f) < 1e-4f && s.screen_shape == 0);
 
         app.debug_select_tab(5);
         shot.save(app, "11_about");
