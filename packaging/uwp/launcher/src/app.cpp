@@ -765,14 +765,12 @@ void App::draw_graphics() {
         }
         ty += 14;
     };
-    body("Output resolution is the size of the picture the game asks your console for. 4K only helps on a 4K TV, "
-         "and the app restarts itself once when you press Play after changing it.", kMuted);
-    body("FSR is an edge-aware upscaler with a sharpening pass (the idea behind AMD FidelityFX Super Resolution 1). "
-         "It stretches the game's picture to the screen more cleanly than plain scaling, so a low in-game "
-         "resolution looks closer to a high one.", kMuted);
-    body("The game's own picture size is still chosen in its Graphics Options menu and tops out at 1600 x 1200, "
-         "which is what the engine was built for. Upscaling does the rest.", kMuted);
-    if (uhd) body("4K with FSR is the heaviest combination. If the frame rate drops, turn FSR off or go back to 1080p.", kWarn);
+    body("Output resolution is the picture size the game asks your console for. 4K only helps on a 4K TV. "
+         "After you change it, Play restarts the app once.", kMuted);
+    body("FSR is an edge-aware upscaler with a sharpening pass, in the spirit of AMD FidelityFX Super Resolution 1. "
+         "It makes a low in-game resolution look closer to a high one.", kMuted);
+    body("The game's own picture size is still set in its Graphics Options and stops at 1600 x 1200.", kMuted);
+    if (uhd && settings_.upscaler) body("4K with FSR is the heaviest mix. If the frame rate drops, turn FSR off or go back to 1080p.", kWarn);
 }
 
 void App::draw_story() {
