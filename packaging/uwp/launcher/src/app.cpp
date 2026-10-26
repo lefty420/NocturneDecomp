@@ -770,8 +770,8 @@ void App::draw_graphics() {
         const Rect row{left.x + 24, y, left.w - 48, 96};
         if (focused) { g_.rrect(row, 22, kPanel2.mix(kAccent, 0.25f)); g_.rrect_outline(row, 22, 3.0f, kText); }
         g_.text(row.x + 28, row.y + 30, "Screen shape", 30, kText);
-        const char *names[4] = {"4:3", "Smart", "Stretch", "Zoom"};
-        const float cw = 124, ch = 52, gap = 8;
+        const char *names[4] = {"4:3", "Widescreen", "Stretch", "Zoom"};
+        const float cw = 168, ch = 52, gap = 8;
         float cx = row.right() - 28 - 4 * cw - 3 * gap;
         for (int i = 0; i < 4; ++i) {
             const Rect c{cx, row.y + 22, cw, ch};
@@ -814,7 +814,7 @@ void App::draw_graphics() {
         }
         ty += 14;
     };
-    body("Screen shape is for wide TVs. 4:3 keeps the game's own shape with bars at the sides. Smart stretches "
+    body("Screen shape is for wide TVs. 4:3 keeps the game's own shape with bars at the sides. Widescreen stretches "
          "the edges more than the middle. Stretch fills evenly. Zoom fills and trims the top and bottom.", kMuted);
     body("4K only helps on a 4K TV. Play restarts the app once after you change it.", kMuted);
     body("FSR sharpens and smooths a picture that is being enlarged.", kMuted);
@@ -949,18 +949,9 @@ void App::draw_toast() {
     g_.text_center(r.cx(), r.y + 12, toast_text_, 26, kText.alpha(a), FontFace::Bold);
 }
 
-// Box art, dimmed, behind everything; then grain and a heavy vignette so the cards stay readable.
+// Plain black behind everything.
 void App::draw_backdrop() {
-    g_.clear_background();
-    if (!cover_tried_) { cover_tried_ = true; cover_ = load_cover(); }
-    if (cover_ && cover_w_ > 0 && cover_h_ > 0) {
-        const float k = static_cast<float>(kDesignW) / cover_w_;           // fill the width; crop top and bottom
-        const float h = cover_h_ * k;
-        g_.image_tinted(cover_, {0, (kDesignH - h) * 0.38f, static_cast<float>(kDesignW), h}, Color(200, 170, 150, 46));
-    }
-    g_.quad_gradient_v({0, 0, static_cast<float>(kDesignW), 360}, Color(8, 5, 4, 200), Color(8, 5, 4, 0));
-    g_.quad_gradient_v({0, kDesignH - 260.0f, static_cast<float>(kDesignW), 260}, Color(8, 5, 4, 0), Color(8, 5, 4, 230));
-    g_.draw_grain(0.6f);
+    g_.fill_black();
 }
 
 void App::draw() {

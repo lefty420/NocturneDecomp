@@ -7,8 +7,8 @@ log covers only the Xbox port and its launcher.
 ## Launcher look
 
 - **1930s pulp-horror theme.** The launcher is restyled as a case file: sepia-black cards with brass double
-  rules and red corner brackets, a paper tab for the selected page, a rubber-stamp "Xbox port" mark, film grain,
-  and the box art dimmed behind everything. Headings use IM Fell Double Pica (OFL) and body text Special Elite
+  rules and red corner brackets, a paper tab for the selected page, a rubber-stamp "Xbox port" mark,
+  and a plain black background. Headings use IM Fell Double Pica (OFL) and body text Special Elite
   (Apache 2.0); both are bundled with their licences, replacing Poppins. Layout, tabs and controls are unchanged.
 
 ## Graphics options
@@ -22,7 +22,7 @@ log covers only the Xbox port and its launcher.
     sharpen in the final blit shader, after AMD FidelityFX Super Resolution 1 (MIT licence); the sharpen step
     is folded into the same pass. It only runs when the picture is being resized, and falls back to plain
     scaling if the shader will not build (`stderr.log` says which).
-- **Screen shape** (same tab) for wide TVs: 4:3 (bars at the sides, the default), Smart (the middle of the picture keeps
+- **Screen shape** (same tab) for wide TVs: 4:3 (bars at the sides, the default), Widescreen (the middle of the picture keeps
   near-true proportions and the edges are stretched progressively more, drawn as a bent strip of 48 columns),
   Stretch (fills evenly), and Zoom (fills the width and crops the top and bottom). Done in the final present, so
   it works with FSR. True widescreen rendering (a wider view instead of a stretched one) is not done: the

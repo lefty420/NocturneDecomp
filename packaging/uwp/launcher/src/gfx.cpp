@@ -189,6 +189,11 @@ void Gfx::quad_gradient_v(const Rect &r, Color top, Color bottom) {
     SDL_RenderGeometry(r_, nullptr, v, 4, idx, 6);
 }
 
+void Gfx::fill_black() {
+    SDL_SetRenderDrawColor(r_, 0, 0, 0, 255);
+    SDL_RenderClear(r_);
+}
+
 void Gfx::clear_background() {
     SDL_SetRenderDrawColor(r_, 0, 0, 0, 255);
     SDL_RenderClear(r_);

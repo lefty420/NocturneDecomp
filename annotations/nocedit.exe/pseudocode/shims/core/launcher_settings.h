@@ -25,7 +25,7 @@ struct NocturneLauncherSettings {
     float fsr_sharpness;    // 0.0 .. 1.0   how hard the sharpening pass works (FSR only)
     int   output_height;    // 1080 (default) or 2160: the size of the picture the console is asked for
     int   screen_shape;     // on a screen wider than the game's 4:3: 0 = bars at the sides (default),
-                            // 1 = smart stretch (centre barely changed, edges stretched), 2 = stretch to fill,
+                            // 1 = widescreen (smart stretch: centre barely changed, edges stretched), 2 = stretch to fill,
                             // 3 = zoom to fill (crops top and bottom)
 };
 

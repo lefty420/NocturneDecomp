@@ -45,6 +45,7 @@ public:
     void set_output_size(int w, int h);
     float scale() const { return scale_; }
 
+    void fill_black();         // solid black
     void clear_background();   // the dark gradient with a soft vignette
     void rrect(const Rect &r, float radius, Color c);          // corners are squared off by the theme
     void rrect_exact(const Rect &r, float radius, Color c);    // the radius as given (circles, pills)
