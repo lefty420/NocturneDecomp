@@ -88,6 +88,10 @@ private:
     SDL_Texture *cover_ = nullptr;   // optional box art: cover.bmp in the data folder
     int cover_w_ = 0, cover_h_ = 0;
     bool cover_tried_ = false;
+    SDL_Texture *load_brand();
+    SDL_Texture *brand_ = nullptr;   // the claw marks in the header, from the game files
+    int brand_w_ = 0, brand_h_ = 0;
+    bool brand_tried_ = false;
     void draw_modal();
     void draw_toast();
 

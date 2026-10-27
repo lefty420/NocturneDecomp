@@ -74,6 +74,7 @@ App::~App() {
     }
     if (scan_.valid()) scan_.wait();
     if (cover_) SDL_DestroyTexture(cover_);
+    if (brand_) SDL_DestroyTexture(brand_);
 }
 
 void App::start_scan() {
@@ -164,6 +165,8 @@ void App::close_import() {
     modal_ = Modal::None;
     cover_tried_ = false;
     if (cover_) { SDL_DestroyTexture(cover_); cover_ = nullptr; }
+    brand_tried_ = false;
+    if (brand_) { SDL_DestroyTexture(brand_); brand_ = nullptr; }
     start_scan();
 }
 
@@ -434,12 +437,19 @@ void App::draw_header() {
     g_.text(kMarginX, 30, "NOCTURNE", 84, kText, FontFace::Bold, 12.0f);
     g_.line(kMarginX, 130, kMarginX + 470, 130, 2.0f, kBorder);
     g_.line(kMarginX, 137, kMarginX + 470, 137, 4.0f, kAccent);
-    // A rubber-stamp for the port, and the credit line.
-    const Rect stamp{kDesignW - kMarginX - 260, 36, 260, 58};
-    g_.rrect_outline(stamp, 8, 3.0f, kAccentSoft.alpha(0.9f));
-    g_.rrect_outline(stamp.inset(7), 4, 1.0f, kAccentSoft.alpha(0.6f));
-    g_.text_center(stamp.cx(), stamp.y + 8, "XBOX PORT", 34, kAccentSoft, FontFace::Bold, 5.0f);
-    g_.text_right(kDesignW - kMarginX, 106, "Based on NocturneDecomp by NearlyTRex", 21, kMuted);
+    // Top right: the claw marks from the game's files (when they are there), the port line, and the credit line.
+    if (!brand_tried_) { brand_tried_ = true; brand_ = load_brand(); }
+    float text_right = kDesignW - kMarginX;
+    if (brand_ && brand_w_ > 0 && brand_h_ > 0) {
+        const float box_h = 92.0f, box_w = 130.0f;
+        const float k = std::min(box_w / brand_w_, box_h / brand_h_);
+        const Rect img{kDesignW - kMarginX - brand_w_ * k, 14, brand_w_ * k, brand_h_ * k};
+        g_.image(brand_, img);
+        text_right = img.x - 22;
+    }
+    g_.text_right(text_right, 28, "XBOX SERIES X|S", 36, kAccentSoft, FontFace::Bold, 4.0f);
+    g_.text_right(text_right, 72, "by Lefty420", 28, kText, FontFace::Medium);
+    g_.text_right(kDesignW - kMarginX, 110, "Based on NocturneDecomp by NearlyTRex", 21, kMuted);
 }
 
 void App::draw_tabs() {
@@ -780,6 +790,27 @@ bool ends_with_raw(const std::string &name) {
     return n.size() > 4 && n.compare(n.size() - 4, 4, ".raw") == 0;
 }
 
+// Decodes one of the game's 640x480 8-bit ".RAW" pictures with its ".ACT" palette (same name, same archive).
+bool decode_raw_picture(const fs::path &pod, const nl::PodEntry &e, std::vector<unsigned char> &rgba) {
+    std::vector<unsigned char> bytes;
+    if (!nl::read_pod_entry(pod, e, bytes) || bytes.size() != 640u * 480u) return false;
+    std::vector<nl::PodEntry> all;
+    if (!nl::read_pod_directory(pod, all)) return false;
+    const std::string want = lower(e.name.substr(0, e.name.size() - 4) + ".ACT");
+    std::vector<unsigned char> pal;
+    for (const nl::PodEntry &a : all)
+        if (lower(a.name) == want && nl::read_pod_entry(pod, a, pal, 4096)) break;
+    if (pal.size() < 768) return false;
+    rgba.assign(640u * 480u * 4, 255);
+    for (size_t i = 0; i < 640u * 480u; ++i) {
+        const unsigned idx = bytes[i];
+        rgba[i * 4] = pal[idx * 3];
+        rgba[i * 4 + 1] = pal[idx * 3 + 1];
+        rgba[i * 4 + 2] = pal[idx * 3 + 2];
+    }
+    return true;
+}
+
 }  // namespace
 
 SDL_Texture *App::load_cover() {
@@ -794,23 +825,8 @@ SDL_Texture *App::load_cover() {
         std::vector<unsigned char> bytes;
         if (!nl::read_pod_entry(pod, e, bytes)) return nullptr;
         if (ends_with_raw(e.name)) {
-            // 640x480, one byte per pixel, colours from the ".ACT" file next to it in the same archive.
-            if (bytes.size() != 640u * 480u) return nullptr;
-            std::vector<nl::PodEntry> all;
-            if (!nl::read_pod_directory(pod, all)) return nullptr;
-            const std::string want = lower(e.name.substr(0, e.name.size() - 4) + ".ACT");
-            std::vector<unsigned char> pal;
-            for (const nl::PodEntry &a : all)
-                if (lower(a.name) == want && nl::read_pod_entry(pod, a, pal, 4096)) break;
-            if (pal.size() < 768) return nullptr;
-            std::vector<unsigned char> rgba(640u * 480u * 4);
-            for (size_t i = 0; i < 640u * 480u; ++i) {
-                const unsigned idx = bytes[i];
-                rgba[i * 4] = pal[idx * 3];
-                rgba[i * 4 + 1] = pal[idx * 3 + 1];
-                rgba[i * 4 + 2] = pal[idx * 3 + 2];
-                rgba[i * 4 + 3] = 255;
-            }
+            std::vector<unsigned char> rgba;
+            if (!decode_raw_picture(pod, e, rgba)) return nullptr;
             cover_w_ = 640;
             cover_h_ = 480;
             return g_.texture_from_rgba(rgba.data(), 640, 480);
@@ -867,6 +883,43 @@ SDL_Texture *App::load_cover() {
             std::ofstream out(choice, std::ios::trunc);
             out << c.pod.filename().string() << "\n" << c.entry.name << "\n";
             return t;
+        }
+    }
+    return nullptr;
+}
+
+// The claw marks from the game's own files (ART\\FANGS.RAW in STARTUP.pod), cropped to the marks, for the corner
+// of the header. Nothing is bundled: without the game files the header is text only.
+SDL_Texture *App::load_brand() {
+    std::error_code ec;
+    const fs::path game = nl::effective_data_dir(root_);
+    for (fs::directory_iterator it(game, ec), end; !ec && it != end; it.increment(ec)) {
+        if (lower(it->path().filename().string()) != "startup.pod") continue;
+        std::vector<nl::PodEntry> entries;
+        if (!nl::read_pod_directory(it->path(), entries)) return nullptr;
+        for (const nl::PodEntry &e : entries) {
+            if (upper(e.name) != "ART\\FANGS.RAW") continue;
+            std::vector<unsigned char> rgba;
+            if (!decode_raw_picture(it->path(), e, rgba)) return nullptr;
+            int x0 = 640, y0 = 480, x1 = -1, y1 = -1;
+            for (int y = 0; y < 480; ++y)
+                for (int x = 0; x < 640; ++x) {
+                    const unsigned char *p = &rgba[(static_cast<size_t>(y) * 640 + x) * 4];
+                    if (p[0] + p[1] + p[2] > 3 * 28) {
+                        x0 = std::min(x0, x); x1 = std::max(x1, x);
+                        y0 = std::min(y0, y); y1 = std::max(y1, y);
+                    }
+                }
+            if (x1 < x0 || y1 < y0) return nullptr;
+            x0 = std::max(0, x0 - 6); y0 = std::max(0, y0 - 6); x1 = std::min(639, x1 + 6); y1 = std::min(479, y1 + 6);
+            const int w = x1 - x0 + 1, h = y1 - y0 + 1;
+            std::vector<unsigned char> crop(static_cast<size_t>(w) * h * 4);
+            for (int y = 0; y < h; ++y)
+                std::memcpy(&crop[static_cast<size_t>(y) * w * 4], &rgba[(static_cast<size_t>(y + y0) * 640 + x0) * 4],
+                            static_cast<size_t>(w) * 4);
+            brand_w_ = w;
+            brand_h_ = h;
+            return g_.texture_from_rgba(crop.data(), w, h);
         }
     }
     return nullptr;
