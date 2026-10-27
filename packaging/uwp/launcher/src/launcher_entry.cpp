@@ -21,6 +21,7 @@
 // Breadcrumbs and a crash note in <LocalState>\startup.log: a UWP app that dies at start-up shows
 // nothing. Read it through Device Portal (File explorer > LocalAppData > the app > LocalState).
 extern "C" void nocturne_uwp_claim_back_button(void);   // imports_platform_uwp.cpp (C++/CX)
+extern "C" void nocturne_uwp_describe_display(char *out, int cap);   // imports_platform_uwp.cpp
 extern "C" int nocturne_uwp_set_output_height(int height);   // imports_platform_uwp.cpp (C++/CX)
 
 // The output size this run asked the console for at start-up (1080 or 2160), so Play can tell when the player
@@ -314,6 +315,11 @@ extern "C" void nocturne_boot_init(void) {
         std::snprintf(line, sizeof line, "output: asked for %dp native pixels=%s (result %d)", g_boot_output_height,
                       g_boot_output_height >= 1500 ? "yes" : "no", took);
         nocturne_boot_log(line);
+        char disp[320];
+        nocturne_uwp_describe_display(disp, sizeof disp);
+        char dl[360];
+        std::snprintf(dl, sizeof dl, "display: %s", disp);
+        nocturne_boot_log(dl);
     }
     // The game reports problems on stderr, which a UWP app has nowhere to show: keep it in a file.
     const std::string errpath = nocturne_data_path("stderr.log");

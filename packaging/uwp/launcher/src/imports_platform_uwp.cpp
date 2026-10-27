@@ -20,7 +20,9 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <cstdio>
 #include <cwctype>
+#include <string>
 #include <fstream>
 #include <future>
 
@@ -371,6 +373,58 @@ extern "C" int nocturne_uwp_set_output_height(int height) {
     for (int i = 0; i < 150 && state.load() == -2; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
     const int r = state.load();
     return r == -2 ? -1 : r;
+}
+
+// One line describing what the system reports about the screen and the window, for the log: the window size
+// in view pixels, the scale, and the raw size of the panel / HDMI mode. Used to find out why a 4K console
+// still hands the app a 1920x1080 surface. Every part is guarded; whatever fails is simply left out.
+extern "C" void nocturne_uwp_describe_display(char *out, int cap) {
+    if (out == nullptr || cap <= 0) return;
+    std::string text;
+    char tmp[160];
+    try {
+        auto b = CoreApplication::MainView->CoreWindow->Bounds;
+        std::snprintf(tmp, sizeof tmp, "window %.0fx%.0f", b.Width, b.Height);
+        text += tmp;
+    } catch (...) {
+        text += "window ?";
+    }
+    if (on_ui_thread()) {
+        try {
+            auto di = Windows::Graphics::Display::DisplayInformation::GetForCurrentView();
+            std::snprintf(tmp, sizeof tmp, "; raw %ux%u, scale %.2f, dpi %.0f", di->ScreenWidthInRawPixels,
+                          di->ScreenHeightInRawPixels, static_cast<double>(di->RawPixelsPerViewPixel),
+                          static_cast<double>(di->LogicalDpi));
+            text += tmp;
+        } catch (...) {
+            text += "; display info ?";
+        }
+        try {
+            auto hdmi = Windows::Graphics::Display::Core::HdmiDisplayInformation::GetForCurrentView();
+            if (hdmi != nullptr) {
+                auto cur = hdmi->GetCurrentDisplayMode();
+                std::snprintf(tmp, sizeof tmp, "; hdmi %ux%u@%.0f", cur->ResolutionWidthInRawPixels,
+                              cur->ResolutionHeightInRawPixels, cur->RefreshRate);
+                text += tmp;
+                unsigned best = 0;
+                for (auto m : hdmi->GetSupportedDisplayModes())
+                    best = std::max<unsigned>(best, m->ResolutionHeightInRawPixels);
+                std::snprintf(tmp, sizeof tmp, " (tallest mode %u)", best);
+                text += tmp;
+            }
+        } catch (...) {
+            text += "; hdmi info ?";
+        }
+        try {
+            auto av = Windows::UI::ViewManagement::ApplicationView::GetForCurrentView();
+            std::snprintf(tmp, sizeof tmp, "; bounds mode %d", static_cast<int>(av->DesiredBoundsMode));
+            text += tmp;
+        } catch (...) {
+        }
+    } else {
+        text += "; (not on UI thread)";
+    }
+    std::snprintf(out, static_cast<size_t>(cap), "%s", text.c_str());
 }
 
 // Asks the system to restart the app. Returns if the console refused (or does not support it); on success
