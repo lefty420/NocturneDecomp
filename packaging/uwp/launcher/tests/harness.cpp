@@ -315,7 +315,11 @@ int main(int argc, char **argv) {
         std::vector<E> es = {{"Textures\\wall.bmp", bmp_bytes(400, 300)},
                              {"Interface\\TitleScreen.bmp", bmp_bytes(640, 480)},
                              {"Interface\\icon.bmp", bmp_bytes(32, 32)},
-                             {"Scripts\\a.txt", std::vector<char>(100, 'x')}};
+                             {"Scripts\\a.txt", std::vector<char>(100, 'x')},
+                             {"ART\\STATS.RAW", std::vector<char>(640 * 480)},
+                             {"ART\\STATS.ACT", std::vector<char>(768)}};
+        for (int i = 0; i < 640 * 480; ++i) es[4].data[i] = static_cast<char>((i % 640) / 3 + (i / 640) / 4);
+        for (int i = 0; i < 256; ++i) { es[5].data[i * 3] = static_cast<char>(i); es[5].data[i * 3 + 1] = static_cast<char>(255 - i); es[5].data[i * 3 + 2] = 90; }
         std::string names;
         std::vector<std::uint32_t> name_off;
         for (auto &e : es) { name_off.push_back(static_cast<std::uint32_t>(names.size())); names += e.name; names.push_back('\0'); }
@@ -341,7 +345,7 @@ int main(int argc, char **argv) {
         std::string pod_name, chosen;
         std::getline(in, pod_name);
         std::getline(in, chosen);
-        EXPECT(chosen.find("TitleScreen.bmp") != std::string::npos);
+        EXPECT(chosen.find("STATS.RAW") != std::string::npos);   // the known picture beats a name match
         EXPECT(fs::exists(data / "pod_pictures.txt"));
     }
 

@@ -733,6 +733,11 @@ std::string lower(std::string s) {
     return s;
 }
 
+std::string upper(std::string s) {
+    for (char &c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+}
+
 bool image_extension(const std::string &name) {
     const std::string n = lower(name);
     for (const char *ext : {".png", ".jpg", ".jpeg", ".bmp", ".tga"}) {
@@ -758,6 +763,23 @@ int name_score(const std::string &name) {
     return best;
 }
 
+// The game's own pictures are 640x480 8-bit ".RAW" files with a matching ".ACT" palette (768 bytes, RGB) of the
+// same name. Checked against a retail copy: STARTUP.pod holds ART\\STATS.RAW, the NOCTURNE skull, which makes the
+// cover; LOAD1-4 are the loading pictures, kept as fallbacks. The score puts them ahead of any name match.
+int raw_picture_score(const std::string &upper_name, std::uint32_t size) {
+    if (size != 640u * 480u) return 0;
+    static const char *kPreferred[] = {"ART\\STATS.RAW", "ART\\LOAD1.RAW", "ART\\LOAD2.RAW", "ART\\LOAD3.RAW",
+                                       "ART\\LOAD4.RAW"};
+    for (int i = 0; i < 5; ++i)
+        if (upper_name == kPreferred[i]) return 1000 - i * 10;
+    return 0;
+}
+
+bool ends_with_raw(const std::string &name) {
+    const std::string n = lower(name);
+    return n.size() > 4 && n.compare(n.size() - 4, 4, ".raw") == 0;
+}
+
 }  // namespace
 
 SDL_Texture *App::load_cover() {
@@ -771,6 +793,28 @@ SDL_Texture *App::load_cover() {
     auto from_pod = [&](const fs::path &pod, const nl::PodEntry &e) -> SDL_Texture * {
         std::vector<unsigned char> bytes;
         if (!nl::read_pod_entry(pod, e, bytes)) return nullptr;
+        if (ends_with_raw(e.name)) {
+            // 640x480, one byte per pixel, colours from the ".ACT" file next to it in the same archive.
+            if (bytes.size() != 640u * 480u) return nullptr;
+            std::vector<nl::PodEntry> all;
+            if (!nl::read_pod_directory(pod, all)) return nullptr;
+            const std::string want = lower(e.name.substr(0, e.name.size() - 4) + ".ACT");
+            std::vector<unsigned char> pal;
+            for (const nl::PodEntry &a : all)
+                if (lower(a.name) == want && nl::read_pod_entry(pod, a, pal, 4096)) break;
+            if (pal.size() < 768) return nullptr;
+            std::vector<unsigned char> rgba(640u * 480u * 4);
+            for (size_t i = 0; i < 640u * 480u; ++i) {
+                const unsigned idx = bytes[i];
+                rgba[i * 4] = pal[idx * 3];
+                rgba[i * 4 + 1] = pal[idx * 3 + 1];
+                rgba[i * 4 + 2] = pal[idx * 3 + 2];
+                rgba[i * 4 + 3] = 255;
+            }
+            cover_w_ = 640;
+            cover_h_ = 480;
+            return g_.texture_from_rgba(rgba.data(), 640, 480);
+        }
         return g_.load_image_memory(bytes.data(), bytes.size(), &cover_w_, &cover_h_, 300);
     };
     {
@@ -801,8 +845,13 @@ SDL_Texture *App::load_cover() {
             continue;
         }
         for (const nl::PodEntry &e : entries) {
-            if (!image_extension(e.name)) continue;
-            const int score = name_score(lower(e.name));
+            const int raw_score = ends_with_raw(e.name) ? raw_picture_score(upper(e.name), e.size) : 0;
+            if (!image_extension(e.name) && raw_score == 0) {
+                if (ends_with_raw(e.name) && e.size == 640u * 480u && listed++ < 5000)
+                    listing << it->path().filename().string() << " | " << e.name << " | " << e.size << " | (640x480 picture)\n";
+                continue;
+            }
+            const int score = raw_score ? raw_score : name_score(lower(e.name));
             if (listed++ < 5000)
                 listing << it->path().filename().string() << " | " << e.name << " | " << e.size << " | " << score << "\n";
             if (score > 0 && e.size >= 20 * 1024) found.push_back({score, e.size, it->path(), e});

@@ -375,6 +375,15 @@ SDL_Texture *Gfx::load_image(const std::string &path, int *w, int *h, int min_si
     return load_image_memory(bytes.data(), bytes.size(), w, h, min_side);
 }
 
+// A texture from 8-bit RGBA pixels (w*h*4 bytes), opaque.
+SDL_Texture *Gfx::texture_from_rgba(unsigned char *px, int w, int h) {
+    SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormatFrom(px, w, h, 32, w * 4, SDL_PIXELFORMAT_RGBA32);
+    SDL_Texture *tex = surf ? SDL_CreateTextureFromSurface(r_, surf) : nullptr;
+    if (surf) SDL_FreeSurface(surf);
+    if (tex) SDL_SetTextureScaleMode(tex, SDL_ScaleModeLinear);
+    return tex;
+}
+
 SDL_Texture *Gfx::load_image_memory(const unsigned char *data, size_t size, int *w, int *h, int min_side) {
     if (!data || size == 0 || size > (48u << 20)) return nullptr;
     int iw = 0, ih = 0, comp = 0;
