@@ -11,6 +11,7 @@
 #include "core/debug_log.h"
 
 #include <SDL.h>
+#include <SDL_syswm.h>
 #if defined(NOCTURNE_UWP_LAUNCHER)
 #include "core/data_root.h"
 #endif
@@ -63,6 +64,107 @@ void real_drawable_size(SDL_Window *window, int *w, int *h) {
 #endif
 }
 
+
+#if defined(NOCTURNE_UWP_LAUNCHER)
+// The console hands the app a 1920x1080 CoreWindow even when it is set to 4K, and ANGLE sizes its swap chain
+// from the window. ANGLE can instead make a swap chain of a fixed size that the system then scales to the
+// screen (EGL_ANGLE_window_fixed_size), so the game can be drawn at 3840x2160 regardless. SDL has already made
+// a surface of the window's size; swap it for a fixed-size one. This surface is ours from then on: g_fixed_surface
+// is what timed_swap presents. Anything that fails leaves SDL's own surface in place (or, if the old one was
+// already destroyed, makes a plain window surface), and is logged to stderr.
+void *g_fixed_surface = nullptr;
+void *g_fixed_display = nullptr;
+
+void use_fixed_size_surface(SDL_Window *window, int want_w, int want_h) {
+    typedef void *(*GetCurrent)(int);
+    typedef void *(*GetDisplay)(void);
+    typedef unsigned (*QueryContextFn)(void *, void *, int, int *);
+    typedef const char *(*QueryStringFn)(void *, int);
+    typedef unsigned (*ChooseConfigFn)(void *, const int *, void **, int, int *);
+    typedef void *(*CreateWindowSurfaceFn)(void *, void *, void *, const int *);
+    typedef unsigned (*MakeCurrentFn)(void *, void *, void *, void *);
+    typedef unsigned (*DestroySurfaceFn)(void *, void *);
+    typedef unsigned (*SwapIntervalFn)(void *, int);
+    typedef int (*GetErrorFn)(void);
+    typedef void *(*GetCurrentContext)(void);
+#define NL_EGL(name) static name##Fn egl##name = (name##Fn)SDL_GL_GetProcAddress("egl" #name)
+    static GetCurrent eglGetCurrentSurface = (GetCurrent)SDL_GL_GetProcAddress("eglGetCurrentSurface");
+    static GetDisplay eglGetCurrentDisplay = (GetDisplay)SDL_GL_GetProcAddress("eglGetCurrentDisplay");
+    static GetCurrentContext eglGetCurrentContext = (GetCurrentContext)SDL_GL_GetProcAddress("eglGetCurrentContext");
+    NL_EGL(QueryContext);
+    NL_EGL(QueryString);
+    NL_EGL(ChooseConfig);
+    NL_EGL(CreateWindowSurface);
+    NL_EGL(MakeCurrent);
+    NL_EGL(DestroySurface);
+    NL_EGL(SwapInterval);
+    NL_EGL(GetError);
+#undef NL_EGL
+    if (!eglGetCurrentSurface || !eglGetCurrentDisplay || !eglGetCurrentContext || !eglQueryContext || !eglQueryString ||
+        !eglChooseConfig || !eglCreateWindowSurface || !eglMakeCurrent || !eglDestroySurface || !eglSwapInterval || !eglGetError) {
+        fprintf(stderr, "nocturne: fixed-size surface: EGL entry points missing\n");
+        return;
+    }
+    const int EGL_EXTENSIONS = 0x3055, EGL_DRAW = 0x3059, EGL_CONFIG_ID = 0x3028, EGL_NONE = 0x3038;
+    const int EGL_WIDTH = 0x3057, EGL_HEIGHT = 0x3056, EGL_FIXED_SIZE_ANGLE = 0x3201;
+    void *dpy = eglGetCurrentDisplay();
+    void *ctx = eglGetCurrentContext();
+    void *old_surface = eglGetCurrentSurface(EGL_DRAW);
+    if (!dpy || !ctx || !old_surface) return;
+    const char *ext = eglQueryString(dpy, EGL_EXTENSIONS);
+    if (!ext || !strstr(ext, "EGL_ANGLE_window_fixed_size")) {
+        fprintf(stderr, "nocturne: fixed-size surface: ANGLE has no EGL_ANGLE_window_fixed_size\n");
+        return;
+    }
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(window, &info) || info.subsystem != SDL_SYSWM_WINRT) {
+        fprintf(stderr, "nocturne: fixed-size surface: no WinRT window handle\n");
+        return;
+    }
+    // SDL_SysWMinfo's WinRT member is a single IInspectable* at the start of the union (after the version and
+    // the subsystem), read here without needing SDL's WinRT define.
+    void *native = *(void **)((char *)&info + 8);
+    int config_id = 0;
+    void *config = nullptr;
+    int n = 0;
+    const int want_cfg[3] = {EGL_CONFIG_ID, 0, EGL_NONE};
+    if (!native || !eglQueryContext(dpy, ctx, EGL_CONFIG_ID, &config_id)) {
+        fprintf(stderr, "nocturne: fixed-size surface: could not read the window or config\n");
+        return;
+    }
+    int cfg_attr[3] = {want_cfg[0], config_id, EGL_NONE};
+    if (!eglChooseConfig(dpy, cfg_attr, &config, 1, &n) || n < 1) {
+        fprintf(stderr, "nocturne: fixed-size surface: config %d not found\n", config_id);
+        return;
+    }
+    // A CoreWindow takes one swap chain at a time, so the old surface has to go first.
+    eglMakeCurrent(dpy, nullptr, nullptr, nullptr);
+    eglDestroySurface(dpy, old_surface);
+    const int fixed_attrs[] = {EGL_FIXED_SIZE_ANGLE, 1, EGL_WIDTH, want_w, EGL_HEIGHT, want_h, EGL_NONE};
+    void *surf = eglCreateWindowSurface(dpy, config, native, fixed_attrs);
+    if (!surf) {
+        fprintf(stderr, "nocturne: fixed-size surface %dx%d failed (EGL error 0x%x), using the window size\n", want_w,
+                want_h, (unsigned)eglGetError());
+        const int plain[] = {EGL_NONE};
+        surf = eglCreateWindowSurface(dpy, config, native, plain);
+    }
+    if (!surf || !eglMakeCurrent(dpy, surf, surf, ctx)) {
+        fprintf(stderr, "nocturne: fixed-size surface: could not make a surface current (EGL error 0x%x)\n",
+                (unsigned)eglGetError());
+        return;
+    }
+    eglSwapInterval(dpy, 1);
+    g_fixed_surface = surf;
+    g_fixed_display = dpy;
+}
+
+void eglSwapBuffers_fixed() {
+    typedef unsigned (*Swap)(void *, void *);
+    static Swap swap = (Swap)SDL_GL_GetProcAddress("eglSwapBuffers");
+    if (swap) swap(g_fixed_display, g_fixed_surface);
+}
+#endif
 
 struct GLPresentState {
     SDL_Window   *window        = nullptr;
@@ -242,6 +344,9 @@ extern "C" int nocturne_gl_init(SDL_Window *window) {
         return 0;
     }
 
+#if defined(NOCTURNE_UWP_LAUNCHER)
+    if (nocturne_launcher_settings()->output_height >= 1500) use_fixed_size_surface(window, 3840, 2160);
+#endif
     // Entry points resolve only once a context is current.
     if (!nocturne_gl_load_api()) {
         SDL_GL_DeleteContext(g_gl.context);
@@ -430,7 +535,8 @@ static void timed_swap(SDL_Window *window) {
     static int frames = 0;
     const Uint64 freq = SDL_GetPerformanceFrequency();
     const Uint64 t0 = SDL_GetPerformanceCounter();
-    SDL_GL_SwapWindow(window);
+    if (g_fixed_surface) eglSwapBuffers_fixed();
+    else SDL_GL_SwapWindow(window);
     const Uint64 t1 = SDL_GetPerformanceCounter();
     swap_total += t1 - t0;
     if (last_swap != 0) {
