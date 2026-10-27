@@ -13,7 +13,7 @@
 #   SDL2_INCLUDE_DIRS / SDL2_CFLAGS_OTHER / SDL2_LIBRARIES
 #   SDL2TTF_INCLUDE_DIRS / SDL2TTF_CFLAGS_OTHER / SDL2TTF_LIBRARIES
 #   FFMPEG_INCLUDE_DIRS / FFMPEG_CFLAGS_OTHER / FFMPEG_LIBRARIES
-# so the rest of CMakeLists.txt consumes them unchanged.
+# so the rest of the build consumes them unchanged.
 #
 # The CMake sub-builds (SDL2 / SDL2_ttf) inherit the target from the toolchain's
 # CMAKE_C/CXX_FLAGS_INIT. FFmpeg (autotools, not CMake) has to be told, through
@@ -46,7 +46,13 @@ set(SDL2_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
 set(SDL_LIBUDEV OFF CACHE BOOL "" FORCE)
 set(SDL_DBUS    OFF CACHE BOOL "" FORCE)
 set(SDL_IBUS    OFF CACHE BOOL "" FORCE)
-set(SDL_HIDAPI  OFF CACHE BOOL "" FORCE)
+# HIDAPI itself stays on, for the virtual-joystick driver that hangs off it and
+# that the joystick tests attach their controller through. Its own joystick
+# drivers and libusb stay off, so real controllers are seen as before.
+set(SDL_HIDAPI          ON  CACHE BOOL "" FORCE)
+set(SDL_HIDAPI_JOYSTICK OFF CACHE BOOL "" FORCE)
+set(SDL_HIDAPI_LIBUSB   OFF CACHE BOOL "" FORCE)
+set(SDL_VIRTUAL_JOYSTICK ON CACHE BOOL "" FORCE)
 FetchContent_Declare(sdl2
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
     GIT_TAG        ${NOCTURNE_SDL2_TAG}

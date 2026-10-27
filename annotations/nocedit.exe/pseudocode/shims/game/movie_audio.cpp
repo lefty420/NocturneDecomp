@@ -6,9 +6,12 @@
 // rather than borrowing one of the engine's SFX channels.
 
 #include "game/movie_audio.h"
-#include "shim_config.h"
+
 #include "core/debug_log.h"
 #include "core/ini_setting.h"
+#include "shim_config.h"
+
+#include <cmath>
 
 // Reaches the mute state.
 #include "nocturne.h"
@@ -20,12 +23,14 @@ const char kIniKey[] = "MovieVolume";
 
 // Stored as a percentage, matching how the Sound Options lines are shown and
 // keeping the INI value readable.
-int  s_percent = NOCTURNE_MOVIE_VOLUME_DEFAULT;
+int s_percent = NOCTURNE_MOVIE_VOLUME_DEFAULT;
 bool s_loaded = false;
 
 int clamp_percent(int percent) {
-    if (percent < 0)   return 0;
-    if (percent > 100) return 100;
+    if (percent < 0)
+        return 0;
+    if (percent > 100)
+        return 100;
     return percent;
 }
 
@@ -34,11 +39,11 @@ int clamp_percent(int percent) {
 extern "C" float nocturne_movie_volume_get(void) {
     if (!s_loaded) {
         if (nocturne_ini_exists() == 0) {
-            DLOG("frontend", "no %s yet; movie volume defaults to %d%%",
-                 NOCTURNE_INI_PATH, NOCTURNE_MOVIE_VOLUME_DEFAULT);
+            DLOG("frontend", "no %s yet; movie volume defaults to %d%%", NOCTURNE_INI_PATH,
+                 NOCTURNE_MOVIE_VOLUME_DEFAULT);
         }
-        s_percent = clamp_percent(nocturne_ini_get_int(kIniSection, kIniKey,
-                                                       NOCTURNE_MOVIE_VOLUME_DEFAULT));
+        s_percent = clamp_percent(
+            nocturne_ini_get_int(kIniSection, kIniKey, NOCTURNE_MOVIE_VOLUME_DEFAULT));
         s_loaded = true;
         DLOG("frontend", "loaded MovieVolume=%d%%", s_percent);
     }
@@ -48,7 +53,7 @@ extern "C" float nocturne_movie_volume_get(void) {
 extern "C" void nocturne_movie_volume_set(float volume) {
     // Round rather than truncate: the menu steps in fifths, and 0.2f * 5 lands
     // a hair under 100 in float.
-    int percent = clamp_percent((int)(volume * 100.0f + 0.5f));
+    int percent = clamp_percent((int)std::lround(volume * 100.0f));
 
     s_percent = percent;
     s_loaded = true;

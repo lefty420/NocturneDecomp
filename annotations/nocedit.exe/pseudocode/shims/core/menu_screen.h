@@ -17,11 +17,17 @@
 // start-y. renderMenuAndGetChoice double-spaces an untitled list and adds a
 // line; a titled list is single-spaced and spends lines on the title.
 #define NOCTURNE_MENU_ROWS_UNTITLED(lines) ((lines) * 2 + 1)
-#define NOCTURNE_MENU_ROWS_TITLED(lines)   ((lines) + 4)
+#define NOCTURNE_MENU_ROWS_TITLED(lines) ((lines) + 4)
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// 1 where the app does not end itself: a console's, which the system closes. A
+// platform file sets NOCTURNE_PLATFORM_NO_QUIT=1 for it, and the main menu then
+// has no QUIT line and Escape on it backs out of nothing
+// (NOCTURNE_AUTHENTIC_APP_QUIT).
+extern int g_nocturne_no_quit;
 
 // One frame of the moon backdrop: advances the frame time and the moon, and
 // draws it. The caller must be between CMoon::init and CMoon::free.

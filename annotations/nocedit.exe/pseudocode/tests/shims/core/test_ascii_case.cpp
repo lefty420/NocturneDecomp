@@ -7,12 +7,16 @@
 // that got equality right and the sign wrong would sort a list backwards and
 // look like a game bug, so the ordering is pinned down here as well.
 
-#include "nocturne_test.h"
-
 #include "core/ascii_case.h"
+#include "nocturne_test.h"
 
 #include <cstring>
 #include <string>
+
+// The Microsoft runtime spells it with an underscore and a different name.
+#if defined(_MSC_VER)
+#define strcasecmp _stricmp
+#endif
 
 NOCTURNE_TEST(letters_fold_and_nothing_else_does) {
     CHECK_EQ(nocturne_ascii_lower('A'), 'a');
@@ -21,8 +25,8 @@ NOCTURNE_TEST(letters_fold_and_nothing_else_does) {
     CHECK_EQ(nocturne_ascii_lower('0'), '0');
     CHECK_EQ(nocturne_ascii_lower('_'), '_');
     // The bytes either side of the letters, which an off-by-one fold would take.
-    CHECK_EQ(nocturne_ascii_lower('@'), '@');   // just before 'A'
-    CHECK_EQ(nocturne_ascii_lower('['), '[');   // just after 'Z'
+    CHECK_EQ(nocturne_ascii_lower('@'), '@'); // just before 'A'
+    CHECK_EQ(nocturne_ascii_lower('['), '['); // just after 'Z'
 }
 
 NOCTURNE_TEST(a_byte_above_ascii_is_left_alone) {
@@ -55,8 +59,8 @@ NOCTURNE_TEST(it_agrees_with_the_c_library_on_ascii) {
     // The site it replaces called strcasecmp, and the game runs in the "C"
     // locale where the two are the same rule. Checking the sign rather than the
     // value: both are free to choose the magnitude.
-    static const char *words[] = {"act1.pod", "ACT1.POD", "act2", "ACT",
-                                  "", "a", "Z", "zz", "Save1.NOC"};
+    static const char *words[] = {"act1.pod", "ACT1.POD", "act2", "ACT",      "",
+                                  "a",        "Z",        "zz",   "Save1.NOC"};
     const int count = (int)(sizeof(words) / sizeof(words[0]));
     for (int i = 0; i < count; ++i) {
         for (int j = 0; j < count; ++j) {
@@ -84,6 +88,10 @@ NOCTURNE_TEST(nothing_is_handled_rather_than_crashed) {
     CHECK(nocturne_ascii_icompare(nullptr, "a") < 0);
     CHECK(nocturne_ascii_icompare("a", nullptr) > 0);
     CHECK(!nocturne_ascii_iequals(nullptr, "a"));
+    // And the bounded form the same way.
+    CHECK_EQ(nocturne_ascii_icompare_n(nullptr, nullptr, 3), 0);
+    CHECK(nocturne_ascii_icompare_n(nullptr, "a", 1) < 0);
+    CHECK(nocturne_ascii_icompare_n("a", nullptr, 1) > 0);
 }
 
 NOCTURNE_TEST_MAIN()

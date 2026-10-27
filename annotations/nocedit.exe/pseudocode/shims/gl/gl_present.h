@@ -15,10 +15,8 @@
 // textured fullscreen quad, and the renderer DLL's 3D output lands in the same
 // default framebuffer, composited on the GPU. One SDL_GL_SwapWindow per frame.
 //
-// Compatibility-profile GL (1.x fixed function) is used on purpose — the DX6-era
-// render states the renderer DLL drives (alpha test, fog, shade mode, texture
-// env blend) have direct fixed-function equivalents, so the D3D→GL translation
-// stays a state-for-state mapping rather than a shader reimplementation.
+// The context is 3.3 core, or ES 3.0 under NOCTURNE_GLES: every draw goes
+// through a program of its own, the present quad included (gl_blit.h).
 //
 // Everything here is a no-op returning failure when NOCTURNE_GL_PRESENT is 0,
 // in which case ddraw.cpp keeps its SDL_Renderer path.
@@ -29,9 +27,10 @@ struct SDL_Window;
 extern "C" {
 #endif
 
-// Create the GL context on `window` and build the present resources. Safe to
-// call more than once; later calls just re-apply the logical size. Returns 1 on
-// success, 0 if GL is unavailable or disabled — callers must fall back.
+// Create the GL context on `window`, the game's one window, and load the entry
+// points. Safe to call more than once: once it is up it answers 1 at once.
+// Returns 1 on success, 0 if GL is unavailable or disabled — callers must fall
+// back.
 int nocturne_gl_init(struct SDL_Window *window);
 
 // 1 once nocturne_gl_init has succeeded. Call sites use this to choose between
@@ -63,20 +62,14 @@ unsigned int nocturne_gl_scene_fbo(void);
 int nocturne_gl_ensure_active(void);
 
 // The game's native render resolution (e.g. 640x480). The presented quad is
-// integer-scaled to the largest whole multiple that fits the window and
-// centered, matching what SDL_RenderSetLogicalSize + integer scale did.
+// scaled to the largest size of that aspect that fits the window, centered,
+// and sampled nearest at a whole multiple and linear otherwise.
 void nocturne_gl_set_logical_size(int width, int height);
 
 // Upload `pixels` and draw it as a fullscreen quad, then swap. `bpp` selects the
 // source format: 16 = RGB565, 24 = RGB24 byte order, 32 = ARGB8888 (BGRA bytes).
 // This is the frame boundary — it is the only place that swaps.
-void nocturne_gl_present_framebuffer(const void *pixels, int width, int height,
-                                     int pitch, int bpp);
-
-// Present whatever is already in the default framebuffer, with no upload. Used
-// when a 3D renderer drew the frame on the GPU and there is no CPU-side buffer
-// to composite — uploading a stale one would erase the frame.
-void nocturne_gl_swap_only(void);
+void nocturne_gl_present_framebuffer(const void *pixels, int width, int height, int pitch, int bpp);
 
 // Draw the SCENE target onto the window and swap, letterboxed the same way an
 // uploaded frame is. For a renderer whose finished frame is already in the
@@ -95,8 +88,7 @@ void nocturne_gl_present_scene(void);
 // Depth is left alone on purpose: the master-Z restore runs before this and its
 // result must survive. Same row-order convention as the readback, so an
 // upload/readback round-trip is the identity. No-op when there is no scene FBO.
-void nocturne_gl_scene_upload(const void *pixels, int width, int height,
-                              int pitch, int bpp);
+void nocturne_gl_scene_upload(const void *pixels, int width, int height, int pitch, int bpp);
 
 // Read the presented frame back as tightly packed RGB24 at window resolution.
 // Caller frees *out_rgb with free(). Returns 0 on success. Backs
@@ -115,10 +107,16 @@ int nocturne_gl_read_front(unsigned char **out_rgb, int *out_width, int *out_hei
 // path has to do it here.
 //
 // Passes the input through unchanged when GL is not active.
-void nocturne_gl_window_to_logical(int window_x, int window_y,
-                                   int *out_x, int *out_y);
+void nocturne_gl_window_to_logical(int window_x, int window_y, int *out_x, int *out_y);
 
+// Drop the context and what was drawn with it; nocturne_gl_init brings it up
+// again.
 void nocturne_gl_shutdown(void);
+
+// The time spent waiting in the swap so far, in SDL performance-counter ticks:
+// how much of a frame goes to the display or the GPU rather than to the game.
+// Only grows, across shutdowns too, so a reader takes differences.
+unsigned long long nocturne_gl_swap_ticks(void);
 
 #ifdef __cplusplus
 }
