@@ -3,6 +3,7 @@
 #include "launcher_main.h"
 #include "game_files.h"
 #include "settings_store.h"
+#include "default_config.h"
 
 #include "core/data_root.h"
 
@@ -66,6 +67,36 @@ static void describe_addr(const void *addr, char *out, size_t cap) {
 }
 
 static DWORD g_main_tid = 0;
+
+// ---- Shipped defaults (defaults\launcher.ini, defaults\nocturne.ini in the package) -------------------------
+// See default_config.h. The launcher's own file can be seeded straight away; the game's System\nocturne.ini only
+// exists once the game files are in place, so that one is tried at launch and again after the launcher closes.
+static std::filesystem::path defaults_dir() {
+    char *base = SDL_GetBasePath();
+    std::filesystem::path d = std::filesystem::path(base ? base : "") / "defaults";
+    if (base) SDL_free(base);
+    return d;
+}
+
+static void note_defaults(const char *what, nl::ApplyResult r) {
+    if (r == nl::ApplyResult::Applied) { std::string m = std::string("defaults: ") + what + " applied"; nocturne_boot_log(m.c_str()); }
+    else if (r == nl::ApplyResult::Failed) { std::string m = std::string("defaults: ") + what + " could not be written"; nocturne_boot_log(m.c_str()); }
+}
+
+static void seed_launcher_defaults() {
+    const std::filesystem::path root(nocturne_data_root());
+    note_defaults("launcher.ini", nl::apply_preset(defaults_dir() / "launcher.ini", root / "launcher.ini", true, root / "defaults_launcher.version"));
+}
+
+static void seed_game_defaults() {
+    const std::filesystem::path root(nocturne_data_root());
+    const std::filesystem::path game = nl::effective_data_dir(root);
+    const std::filesystem::path sys = nl::find_ci(game, "System");
+    if (sys.empty()) return;
+    const std::filesystem::path ini = nl::find_ci(sys, "nocturne.ini");
+    if (ini.empty()) return;
+    note_defaults("nocturne.ini", nl::apply_preset(defaults_dir() / "nocturne.ini", ini, false, root / "defaults_nocturne.version"));
+}
 
 static void log_crash(const char *tag, PEXCEPTION_POINTERS ep) {
     char where[400], line[700];
@@ -269,6 +300,7 @@ extern "C" void nocturne_boot_init(void) {
     nocturne_uwp_claim_back_button();
     // Output resolution (launcher.ini, Graphics tab). Read the file directly rather than through the game's
     // cached settings, which must not be loaded before the launcher has had its say.
+    seed_launcher_defaults();
     {
         const NocturneLauncherSettings ls =
             nl::load_settings(std::filesystem::path(nocturne_data_root()) / "launcher.ini");
@@ -321,7 +353,16 @@ extern "C" void nocturne_uwp_return_to_launcher(void) {
     std::exit(0);
 }
 
+static int run_launcher_impl();
+
 extern "C" int nocturne_uwp_run_launcher(void) {
+    seed_game_defaults();                  // game files already in place from an earlier run
+    const int r = run_launcher_impl();
+    if (r) seed_game_defaults();           // files may have just been imported
+    return r;
+}
+
+static int run_launcher_impl() {
     // After the player has pressed Play once with the game files in place, later starts go straight into
     // the game. View + Menu + L3 in the game leaves show_launcher.flag and restarts the app, which brings the
     // launcher back for that one start (and Play there turns the shortcut on again).

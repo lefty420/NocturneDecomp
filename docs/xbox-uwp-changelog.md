@@ -4,6 +4,15 @@ What has changed in the Xbox (UWP, Dev Mode) port of NocturneDecomp, newest firs
 The decompilation itself is the work of NearlyTRex (https://github.com/NearlyTRex/NocturneDecomp); this
 log covers only the Xbox port and its launcher.
 
+## Shipped defaults
+
+- **Preset settings.** The package carries `defaults\nocturne.ini` (merged into the player's `System\nocturne.ini`:
+  graphics, sound, game options, key bindings) and `defaults\launcher.ini` (merged into the launcher's own
+  `launcher.ini`). The merge sets only the keys a preset lists, keeps everything else in the player's file, and
+  is applied once per `; defaults-version: N` number, so later changes by the player are never undone and a
+  higher number re-applies an updated preset. A preset with version 0 does nothing. Results are noted in
+  `startup.log` ("defaults: ... applied").
+
 ## Launcher look
 
 - **1930s pulp-horror theme.** The launcher is restyled as a case file: sepia-black cards with brass double

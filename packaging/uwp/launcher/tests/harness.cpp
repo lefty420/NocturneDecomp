@@ -5,6 +5,7 @@
 
 #include "../src/app.h"
 #include "../src/settings_store.h"
+#include "../src/default_config.h"
 
 #include <chrono>
 #include <cmath>
@@ -72,6 +73,43 @@ int main(int argc, char **argv) {
     Shot shot{surf, r, &gfx, outdir};
 
     const fs::path tmp = fs::temp_directory_path() / "nl_harness";
+    // ---- Scenario 5: shipped defaults merge into the player's ini --------------------------------
+    {
+        const std::string existing = "[Graphics]\r\ngamePIXX=640\r\ngamePIXY=480\r\ngamma=5\r\n\r\n[Control]\r\nkeyWalk=17\r\n";
+        const std::string preset = "; defaults-version: 3\n[Graphics]\ngamePIXX=1600\nGAMEPIXY=1200\nuseDirect3D=1\n[Control]\nkeyRun=42\n[Sound]\nvolume=7\n";
+        const std::string m = merge_ini(existing, preset);
+        EXPECT(preset_version(preset) == 3);
+        EXPECT(m.find("gamePIXX=1600") != std::string::npos);
+        EXPECT(m.find("gamePIXY=1200") != std::string::npos);          // key matched ignoring case, player's spelling kept
+        EXPECT(m.find("gamma=5") != std::string::npos);                // untouched
+        EXPECT(m.find("keyWalk=17") != std::string::npos);
+        EXPECT(m.find("[Sound]\r\nvolume=7") != std::string::npos);    // new section appended, CRLF kept
+        // a new key lands inside its section, before the next one
+        EXPECT(m.find("useDirect3D=1") < m.find("[Control]"));
+        EXPECT(m.find("keyRun=42") > m.find("[Control]") && m.find("keyRun=42") < m.find("[Sound]"));
+        EXPECT(merge_ini(m, preset) == m);                              // applying twice changes nothing
+
+        const fs::path d = tmp / "defaults_test";
+        fs::create_directories(d);
+        write_text_atomic(d / "preset.ini", preset);
+        write_text_atomic(d / "target.ini", existing);
+        EXPECT(apply_preset(d / "preset.ini", d / "target.ini", false, d / "marker") == ApplyResult::Applied);
+        std::string after;
+        read_text(d / "target.ini", &after);
+        EXPECT(after == m);
+        // the player changes something afterwards: it must not be undone
+        write_text_atomic(d / "target.ini", "[Graphics]\ngamePIXX=800\n");
+        EXPECT(apply_preset(d / "preset.ini", d / "target.ini", false, d / "marker") == ApplyResult::AlreadyApplied);
+        read_text(d / "target.ini", &after);
+        EXPECT(after == "[Graphics]\ngamePIXX=800\n");
+        // a newer preset version is applied once more
+        write_text_atomic(d / "preset.ini", "; defaults-version: 4\n[Graphics]\ngamePIXX=1280\n");
+        EXPECT(apply_preset(d / "preset.ini", d / "target.ini", false, d / "marker") == ApplyResult::Applied);
+        // no target and not allowed to create: nothing happens and the marker is not set
+        EXPECT(apply_preset(d / "preset.ini", d / "missing.ini", false, d / "marker2") == ApplyResult::TargetMissing);
+        EXPECT(!fs::exists(d / "marker2"));
+    }
+
     fs::remove_all(tmp);
 
     // ---- Scenario 1: nothing installed ------------------------------------------------
