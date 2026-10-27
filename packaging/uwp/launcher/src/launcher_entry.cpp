@@ -198,11 +198,15 @@ void profiler_main(HANDLE target) {
             if (get_ctx(target, &ctx)) {
                 rip = static_cast<uintptr_t>(ctx.Rip);
                 // Copy the top of the stack while the thread is paused, to find who called into the wait.
-                __try {
-                    std::memcpy(stack_copy, reinterpret_cast<const void *>(ctx.Rsp), sizeof(stack_copy));
+                // Only copy when the whole range is committed, readable memory: the crash notes showed this copy
+                // faulting (and the __except around it not catching it) when the sample landed at an odd moment.
+                MEMORY_BASIC_INFORMATION mbi;
+                const uintptr_t sp = static_cast<uintptr_t>(ctx.Rsp);
+                if (sp > 0x10000 && VirtualQuery(reinterpret_cast<const void *>(sp), &mbi, sizeof mbi) &&
+                    mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
+                    sp + sizeof(stack_copy) <= reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize) {
+                    std::memcpy(stack_copy, reinterpret_cast<const void *>(sp), sizeof(stack_copy));
                     have_stack = true;
-                } __except (EXCEPTION_EXECUTE_HANDLER) {
-                    have_stack = false;
                 }
             }
             resume(target);
@@ -316,8 +320,11 @@ extern "C" void nocturne_boot_init(void) {
     if (std::freopen(errpath.c_str(), "a", stderr)) std::setvbuf(stderr, nullptr, _IONBF, 0);
     // The sampler pauses the game thread many times a second, so it only runs when asked for: put a file
     // called profile.flag in the app data folder (next to startup.log) and restart.
+    // One launch only: the flag is removed as it is used, so a forgotten profile.flag cannot keep the sampler
+    // (which pauses the game thread many times a second) running on every start.
     if (FILE *f = std::fopen(nocturne_data_path("profile.flag").c_str(), "rb")) {
         std::fclose(f);
+        std::remove(nocturne_data_path("profile.flag").c_str());
         start_profiler();
     }
 

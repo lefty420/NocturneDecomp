@@ -101,7 +101,8 @@ log covers only the Xbox port and its launcher.
 - `fps.log`: frame rate, frame time and swap wait every 5 seconds, fresh each launch.
 - `profile.flag`: create an empty file with this name next to `startup.log` and restart to enable a
   sampling profiler that writes `perf.log` (which game functions the CPU spends time in). Off by default
-  because it slows the game slightly.
+  because it slows the game slightly. It profiles one launch only: the app deletes the flag as it starts, so a
+  forgotten flag cannot leave the sampler running (it caused random start-up crashes before this change).
 - CI resolves profiler addresses to function names from the link map (`.github/scripts/map_symbols.py`).
 
 ## Keeping in sync with upstream
