@@ -9,6 +9,9 @@
 
 #include <chrono>
 #include <cmath>
+#include <vector>
+#include <iterator>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -291,30 +294,55 @@ int main(int argc, char **argv) {
         shot.save(app, "14_story_with_cover");
     }
 
-    // ---- Scenario 4b: no cover supplied; a picture inside the game files is found and remembered ----------
+    // ---- Scenario 4b: no cover supplied; a picture inside a .pod archive is found and remembered ----------
     {
         const fs::path data = tmp / "data_search";
-        fs::create_directories(data / "System" / "Art");
-        auto make = [&](const fs::path &file, int w, int h) {
+        fs::create_directories(data / "System");
+        auto bmp_bytes = [&](int w, int h) {
             SDL_Surface *c = SDL_CreateRGBSurfaceWithFormat(0, w, h, 24, SDL_PIXELFORMAT_RGB24);
             for (int y = 0; y < h; ++y)
                 for (int x = 0; x < w; ++x) {
                     Uint8 *px = static_cast<Uint8 *>(c->pixels) + y * c->pitch + x * 3;
                     px[0] = static_cast<Uint8>(x); px[1] = static_cast<Uint8>(y); px[2] = 120;
                 }
-            EXPECT(SDL_SaveBMP(c, file.string().c_str()) == 0);
+            const fs::path f = tmp / "t.bmp";
+            EXPECT(SDL_SaveBMP(c, f.string().c_str()) == 0);
             SDL_FreeSurface(c);
+            std::ifstream in(f, std::ios::binary);
+            return std::vector<char>((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         };
-        make(data / "System" / "Art" / "TitleScreen.bmp", 320, 240);   // the one to pick (name + size)
-        make(data / "System" / "Art" / "wall.bmp", 400, 300);          // bigger, but a worse name
-        make(data / "System" / "Art" / "icon.bmp", 32, 32);            // far too small, must be ignored
+        struct E { std::string name; std::vector<char> data; };
+        std::vector<E> es = {{"Textures\\wall.bmp", bmp_bytes(400, 300)},
+                             {"Interface\\TitleScreen.bmp", bmp_bytes(640, 480)},
+                             {"Interface\\icon.bmp", bmp_bytes(32, 32)},
+                             {"Scripts\\a.txt", std::vector<char>(100, 'x')}};
+        std::string names;
+        std::vector<std::uint32_t> name_off;
+        for (auto &e : es) { name_off.push_back(static_cast<std::uint32_t>(names.size())); names += e.name; names.push_back('\0'); }
+        const std::uint32_t table = 0x60 + static_cast<std::uint32_t>(es.size()) * 20;
+        std::uint32_t pos = table + static_cast<std::uint32_t>(names.size());
+        std::string pod(0x60, '\0');
+        std::memcpy(&pod[0], "POD2", 4);
+        const std::uint32_t count = static_cast<std::uint32_t>(es.size());
+        std::memcpy(&pod[0x58], &count, 4);
+        for (size_t i = 0; i < es.size(); ++i) {
+            const std::uint32_t row[5] = {name_off[i], static_cast<std::uint32_t>(es[i].data.size()), pos, 0, 0};
+            pod.append(reinterpret_cast<const char *>(row), 20);
+            pos += static_cast<std::uint32_t>(es[i].data.size());
+        }
+        pod += names;
+        for (auto &e : es) pod.append(e.data.data(), e.data.size());
+        { std::ofstream out(data / "System" / "x.pod", std::ios::binary); out.write(pod.data(), static_cast<std::streamsize>(pod.size())); }
+        { std::ofstream out(data / "ACT1.POD", std::ios::binary); out.write(pod.data(), static_cast<std::streamsize>(pod.size())); }
         App app(gfx, data, {});
         app.debug_wait_scan();
         shot.save(app, "13b_play_found_picture");
         std::ifstream in(data / "cover_choice.txt");
-        std::string chosen;
+        std::string pod_name, chosen;
+        std::getline(in, pod_name);
         std::getline(in, chosen);
         EXPECT(chosen.find("TitleScreen.bmp") != std::string::npos);
+        EXPECT(fs::exists(data / "pod_pictures.txt"));
     }
 
     fs::remove_all(tmp);

@@ -110,7 +110,11 @@ void use_fixed_size_surface(SDL_Window *window, int want_w, int want_h) {
     void *dpy = eglGetCurrentDisplay();
     void *ctx = eglGetCurrentContext();
     void *old_surface = eglGetCurrentSurface(EGL_DRAW);
-    if (!dpy || !ctx || !old_surface) return;
+    if (!dpy || !ctx || !old_surface) {
+        fprintf(stderr, "nocturne: fixed-size surface: no current EGL display/context/surface (%p %p %p)\n", dpy, ctx,
+                old_surface);
+        return;
+    }
     const char *ext = eglQueryString(dpy, EGL_EXTENSIONS);
     if (!ext || !strstr(ext, "EGL_ANGLE_window_fixed_size")) {
         fprintf(stderr, "nocturne: fixed-size surface: ANGLE has no EGL_ANGLE_window_fixed_size\n");
@@ -157,6 +161,7 @@ void use_fixed_size_surface(SDL_Window *window, int want_w, int want_h) {
     eglSwapInterval(dpy, 1);
     g_fixed_surface = surf;
     g_fixed_display = dpy;
+    fprintf(stderr, "nocturne: fixed-size surface in use (asked for %dx%d)\n", want_w, want_h);
 }
 
 void eglSwapBuffers_fixed() {
@@ -345,6 +350,7 @@ extern "C" int nocturne_gl_init(SDL_Window *window) {
     }
 
 #if defined(NOCTURNE_UWP_LAUNCHER)
+    fprintf(stderr, "nocturne: output_height setting %d\n", nocturne_launcher_settings()->output_height);
     if (nocturne_launcher_settings()->output_height >= 1500) use_fixed_size_surface(window, 3840, 2160);
 #endif
     // Entry points resolve only once a context is current.

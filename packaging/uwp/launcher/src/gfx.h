@@ -71,6 +71,7 @@ public:
     // Null when the file is missing or unreadable. The caller destroys the texture.
     SDL_Texture *load_bmp(const std::string &path, int *w, int *h);
     SDL_Texture *load_image(const std::string &path, int *w, int *h, int min_side = 1);   // png/jpg/bmp/tga
+    SDL_Texture *load_image_memory(const unsigned char *data, size_t size, int *w, int *h, int min_side = 1);
     // Draws `tex` scaled into `dst` (design-space rectangle).
     void image(SDL_Texture *tex, const Rect &dst);
     void image_tinted(SDL_Texture *tex, const Rect &dst, Color tint);   // colour and alpha multiply the picture

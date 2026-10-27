@@ -1,5 +1,6 @@
 #include "app.h"
 
+#include "pod_reader.h"
 #include "settings_store.h"
 
 #include <algorithm>
@@ -7,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cctype>
+#include <cstring>
 #include <fstream>
 #include <system_error>
 
@@ -716,12 +718,14 @@ void App::draw_settings() {
     g_.text(lx + 152, cy + R + 82, "What the game sees", 22, kMuted);
 }
 
-// The box art. Nothing is bundled: the picture comes from the player's own files.
-//   1. A picture named cover (png, jpg, bmp or tga) in the app's data folder or its Assets folder, which
-//      always wins, so the player can pick their own.
-//   2. The one chosen on an earlier start (cover_choice.txt), so the search below runs once.
-//   3. The best-looking picture found inside the game files: names like cover, box, title, logo, menu or
-//      loading rank highest, then bigger files. Small pictures (icons, sprites) are ignored.
+// The box art. Nothing is bundled and the game keeps its pictures inside the .pod archives, so:
+//   1. A picture named cover (png, jpg, bmp or tga) in the app's data folder or its Assets folder always wins,
+//      so the player can pick their own.
+//   2. The picture chosen on an earlier start (cover_choice.txt: archive, tab, entry name).
+//   3. Otherwise the .pod archives are searched for a picture whose name says what it is (cover, box, title,
+//      logo, menu, splash, loading ...) that is at least 300 px on its short side. If nothing qualifies, no
+//      picture is shown rather than a random one. Every picture found in the archives is listed in
+//      pod_pictures.txt, so a wrong or missing pick can be fixed by name.
 namespace {
 
 std::string lower(std::string s) {
@@ -729,18 +733,28 @@ std::string lower(std::string s) {
     return s;
 }
 
-bool image_extension(const std::string &ext) {
-    return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga";
+bool image_extension(const std::string &name) {
+    const std::string n = lower(name);
+    for (const char *ext : {".png", ".jpg", ".jpeg", ".bmp", ".tga"}) {
+        const size_t len = std::strlen(ext);
+        if (n.size() > len && n.compare(n.size() - len, len, ext) == 0) return true;
+    }
+    return false;
 }
 
-int name_score(const std::string &stem) {
+// How much a (lower-case) entry name looks like a cover / home screen. 0 means "not a candidate".
+int name_score(const std::string &name) {
+    const size_t slash = name.find_last_of("\\/");
+    const std::string leaf = slash == std::string::npos ? name : name.substr(slash + 1);
     static const struct { const char *word; int score; } kWords[] = {
-        {"cover", 100}, {"box", 90}, {"title", 80}, {"front", 70}, {"logo", 60}, {"menu", 50},
-        {"splash", 50}, {"loading", 40}, {"main", 20}, {"intro", 20},
+        {"cover", 100}, {"boxart", 100}, {"box", 90}, {"title", 90}, {"front", 70}, {"logo", 60}, {"mainmenu", 80},
+        {"menu", 60}, {"splash", 60}, {"loading", 40}, {"intro", 30}, {"screen", 20},
     };
     int best = 0;
-    for (const auto &k : kWords)
-        if (stem.find(k.word) != std::string::npos) best = std::max(best, k.score);
+    for (const auto &k : kWords) {
+        if (leaf.find(k.word) != std::string::npos) best = std::max(best, k.score);
+        else if (name.find(k.word) != std::string::npos) best = std::max(best, k.score / 3);
+    }
     return best;
 }
 
@@ -754,28 +768,45 @@ SDL_Texture *App::load_cover() {
 
     const fs::path choice = root_ / "cover_choice.txt";
     std::error_code ec;
+    auto from_pod = [&](const fs::path &pod, const nl::PodEntry &e) -> SDL_Texture * {
+        std::vector<unsigned char> bytes;
+        if (!nl::read_pod_entry(pod, e, bytes)) return nullptr;
+        return g_.load_image_memory(bytes.data(), bytes.size(), &cover_w_, &cover_h_, 300);
+    };
     {
         std::ifstream in(choice);
-        std::string path;
-        if (in && std::getline(in, path) && !path.empty() && fs::exists(fs::u8path(path), ec))
-            if (SDL_Texture *t = g_.load_image(path, &cover_w_, &cover_h_, 200)) return t;
+        std::string pod_name, entry_name;
+        if (in && std::getline(in, pod_name) && std::getline(in, entry_name) && !pod_name.empty()) {
+            std::vector<nl::PodEntry> entries;
+            const fs::path pod = nl::effective_data_dir(root_) / pod_name;
+            if (nl::read_pod_directory(pod, entries))
+                for (const nl::PodEntry &e : entries)
+                    if (e.name == entry_name)
+                        if (SDL_Texture *t = from_pod(pod, e)) return t;
+        }
     }
 
-    struct Candidate { int score; std::uintmax_t size; fs::path path; };
+    struct Candidate { int score; std::uint32_t size; fs::path pod; nl::PodEntry entry; };
     std::vector<Candidate> found;
+    std::ofstream listing(root_ / "pod_pictures.txt", std::ios::trunc);
+    listing << "Pictures found inside the game's .pod archives (archive | entry | bytes | score):\n";
     const fs::path game = nl::effective_data_dir(root_);
-    if (!fs::is_directory(game, ec)) return nullptr;
-    int visited = 0;
-    for (fs::recursive_directory_iterator it(game, fs::directory_options::skip_permission_denied, ec), end;
-         !ec && it != end && visited < 30000; it.increment(ec), ++visited) {
-        if (it.depth() > 5) { it.disable_recursion_pending(); continue; }
+    int listed = 0;
+    for (fs::directory_iterator it(game, ec), end; !ec && it != end; it.increment(ec)) {
         std::error_code e2;
-        if (!it->is_regular_file(e2)) continue;
-        const std::string ext = lower(it->path().extension().string());
-        if (!image_extension(ext)) continue;
-        const std::uintmax_t size = it->file_size(e2);
-        if (e2 || size < 30 * 1024 || size > (24u << 20)) continue;
-        found.push_back({name_score(lower(it->path().stem().string())), size, it->path()});
+        if (!it->is_regular_file(e2) || lower(it->path().extension().string()) != ".pod") continue;
+        std::vector<nl::PodEntry> entries;
+        if (!nl::read_pod_directory(it->path(), entries)) {
+            listing << it->path().filename().string() << " | (not a POD2 archive, skipped)\n";
+            continue;
+        }
+        for (const nl::PodEntry &e : entries) {
+            if (!image_extension(e.name)) continue;
+            const int score = name_score(lower(e.name));
+            if (listed++ < 5000)
+                listing << it->path().filename().string() << " | " << e.name << " | " << e.size << " | " << score << "\n";
+            if (score > 0 && e.size >= 20 * 1024) found.push_back({score, e.size, it->path(), e});
+        }
     }
     std::sort(found.begin(), found.end(), [](const Candidate &a, const Candidate &b) {
         return a.score != b.score ? a.score > b.score : a.size > b.size;
@@ -783,9 +814,9 @@ SDL_Texture *App::load_cover() {
     int tries = 0;
     for (const Candidate &c : found) {
         if (++tries > 12) break;
-        if (SDL_Texture *t = g_.load_image(c.path.string(), &cover_w_, &cover_h_, 200)) {
+        if (SDL_Texture *t = from_pod(c.pod, c.entry)) {
             std::ofstream out(choice, std::ios::trunc);
-            out << c.path.string() << "\n";
+            out << c.pod.filename().string() << "\n" << c.entry.name << "\n";
             return t;
         }
     }
@@ -806,7 +837,7 @@ void App::draw_cover(const Rect &p) {
     } else {
         g_.text_center(p.cx(), p.cy() - 60, "NOCTURNE", 44, kMuted, FontFace::Bold, 6.0f);
         int n = 0;
-        for (const std::string &l : wrap("No picture found yet. Once the game files are added, one of their pictures is used here. To pick your own, put a picture named cover.png (or jpg, bmp, tga) in the app's data folder.", p.w - 80, 22))
+        for (const std::string &l : wrap("No picture found yet. Once the game files are added, a cover or title picture from their archives is used here. To pick your own, put a picture named cover.png (or jpg, bmp, tga) in the app's data folder.", p.w - 80, 22))
             g_.text_center(p.cx(), p.cy() + 10 + 32 * n++, l, 22, kFaint);
     }
 }

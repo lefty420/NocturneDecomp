@@ -372,12 +372,18 @@ SDL_Texture *Gfx::load_image(const std::string &path, int *w, int *h, int min_si
     std::ifstream in(path, std::ios::binary);
     if (!in) return nullptr;
     const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (bytes.empty() || bytes.size() > (48u << 20)) return nullptr;
+    return load_image_memory(bytes.data(), bytes.size(), w, h, min_side);
+}
+
+SDL_Texture *Gfx::load_image_memory(const unsigned char *data, size_t size, int *w, int *h, int min_side) {
+    if (!data || size == 0 || size > (48u << 20)) return nullptr;
     int iw = 0, ih = 0, comp = 0;
-    if (!stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &iw, &ih, &comp)) return nullptr;
+    if (!stbi_info_from_memory(data, static_cast<int>(size), &iw, &ih, &comp)) return nullptr;
     if (std::min(iw, ih) < min_side || std::max(iw, ih) > 8192) return nullptr;
-    unsigned char *px = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &iw, &ih, &comp, 4);
+    unsigned char *px = stbi_load_from_memory(data, static_cast<int>(size), &iw, &ih, &comp, 4);
     if (!px) return nullptr;
+    // Old TGA/BMP files often carry an all-zero alpha channel; a picture is opaque here.
+    for (int i = 0; i < iw * ih; ++i) px[i * 4 + 3] = 255;
     SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormatFrom(px, iw, ih, 32, iw * 4, SDL_PIXELFORMAT_RGBA32);
     SDL_Texture *tex = surf ? SDL_CreateTextureFromSurface(r_, surf) : nullptr;
     if (surf) SDL_FreeSurface(surf);
