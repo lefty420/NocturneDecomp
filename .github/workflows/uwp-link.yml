@@ -180,7 +180,6 @@ jobs:
           Copy-Item packaging\uwp\launcher\assets\fonts\*.txt "$P\fonts"
           New-Item -ItemType Directory -Force "$P\defaults" | Out-Null
           Copy-Item packaging\uwp\defaults\*.ini "$P\defaults"
-          Copy-Item packaging\uwp\launcher\assets\cover.bmp $P
           python -m pip install -q pillow 2>&1 | Out-Null
           python .github\scripts\make_logos.py "$P\Assets" packaging\uwp\assets\icon.png
           # What the exe and each bundled DLL import: anything that is not a Windows/UWP system DLL or

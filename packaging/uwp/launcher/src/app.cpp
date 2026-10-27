@@ -6,6 +6,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cctype>
+#include <fstream>
+#include <system_error>
 
 namespace fs = std::filesystem;
 
@@ -713,16 +716,80 @@ void App::draw_settings() {
     g_.text(lx + 152, cy + R + 82, "What the game sees", 22, kMuted);
 }
 
-// The box art: cover.bmp in the data folder (so the player can swap it), else the one in the package.
+// The box art. Nothing is bundled: the picture comes from the player's own files.
+//   1. A picture named cover (png, jpg, bmp or tga) in the app's data folder or its Assets folder, which
+//      always wins, so the player can pick their own.
+//   2. The one chosen on an earlier start (cover_choice.txt), so the search below runs once.
+//   3. The best-looking picture found inside the game files: names like cover, box, title, logo, menu or
+//      loading rank highest, then bigger files. Small pictures (icons, sprites) are ignored.
+namespace {
+
+std::string lower(std::string s) {
+    for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+bool image_extension(const std::string &ext) {
+    return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga";
+}
+
+int name_score(const std::string &stem) {
+    static const struct { const char *word; int score; } kWords[] = {
+        {"cover", 100}, {"box", 90}, {"title", 80}, {"front", 70}, {"logo", 60}, {"menu", 50},
+        {"splash", 50}, {"loading", 40}, {"main", 20}, {"intro", 20},
+    };
+    int best = 0;
+    for (const auto &k : kWords)
+        if (stem.find(k.word) != std::string::npos) best = std::max(best, k.score);
+    return best;
+}
+
+}  // namespace
+
 SDL_Texture *App::load_cover() {
-    SDL_Texture *t = g_.load_bmp((root_ / "cover.bmp").string(), &cover_w_, &cover_h_);
-    if (t) return t;
-    char *base = SDL_GetBasePath();
-    if (base) {
-        t = g_.load_bmp((fs::path(base) / "cover.bmp").string(), &cover_w_, &cover_h_);
-        SDL_free(base);
+    const char *kTypes[] = {".png", ".jpg", ".jpeg", ".bmp", ".tga"};
+    for (const fs::path &dir : {root_, root_ / "Assets"})
+        for (const char *ext : kTypes)
+            if (SDL_Texture *t = g_.load_image((dir / (std::string("cover") + ext)).string(), &cover_w_, &cover_h_)) return t;
+
+    const fs::path choice = root_ / "cover_choice.txt";
+    std::error_code ec;
+    {
+        std::ifstream in(choice);
+        std::string path;
+        if (in && std::getline(in, path) && !path.empty() && fs::exists(fs::u8path(path), ec))
+            if (SDL_Texture *t = g_.load_image(path, &cover_w_, &cover_h_, 200)) return t;
     }
-    return t;
+
+    struct Candidate { int score; std::uintmax_t size; fs::path path; };
+    std::vector<Candidate> found;
+    const fs::path game = nl::effective_data_dir(root_);
+    if (!fs::is_directory(game, ec)) return nullptr;
+    int visited = 0;
+    for (fs::recursive_directory_iterator it(game, fs::directory_options::skip_permission_denied, ec), end;
+         !ec && it != end && visited < 30000; it.increment(ec), ++visited) {
+        if (it.depth() > 5) { it.disable_recursion_pending(); continue; }
+        std::error_code e2;
+        if (!it->is_regular_file(e2)) continue;
+        const std::string ext = lower(it->path().extension().string());
+        if (!image_extension(ext)) continue;
+        const std::uintmax_t size = it->file_size(e2);
+        if (e2 || size < 30 * 1024 || size > (24u << 20)) continue;
+        found.push_back({name_score(lower(it->path().stem().string())), size, it->path()});
+    }
+    std::sort(found.begin(), found.end(), [](const Candidate &a, const Candidate &b) {
+        return a.score != b.score ? a.score > b.score : a.size > b.size;
+    });
+    int tries = 0;
+    for (const Candidate &c : found) {
+        if (++tries > 12) break;
+        if (SDL_Texture *t = g_.load_image(c.path.string(), &cover_w_, &cover_h_, 200)) {
+            std::ofstream out(choice, std::ios::trunc);
+            out << c.path.string() << "\n";
+            return t;
+        }
+    }
+    return nullptr;
 }
 
 void App::draw_cover(const Rect &p) {
@@ -739,7 +806,7 @@ void App::draw_cover(const Rect &p) {
     } else {
         g_.text_center(p.cx(), p.cy() - 60, "NOCTURNE", 44, kMuted, FontFace::Bold, 6.0f);
         int n = 0;
-        for (const std::string &l : wrap("No box art found. Put a picture named cover.bmp in the app's data folder to show it here.", p.w - 80, 22))
+        for (const std::string &l : wrap("No picture found yet. Once the game files are added, one of their pictures is used here. To pick your own, put a picture named cover.png (or jpg, bmp, tga) in the app's data folder.", p.w - 80, 22))
             g_.text_center(p.cx(), p.cy() + 10 + 32 * n++, l, 22, kFaint);
     }
 }

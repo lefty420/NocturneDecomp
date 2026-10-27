@@ -291,6 +291,32 @@ int main(int argc, char **argv) {
         shot.save(app, "14_story_with_cover");
     }
 
+    // ---- Scenario 4b: no cover supplied; a picture inside the game files is found and remembered ----------
+    {
+        const fs::path data = tmp / "data_search";
+        fs::create_directories(data / "System" / "Art");
+        auto make = [&](const fs::path &file, int w, int h) {
+            SDL_Surface *c = SDL_CreateRGBSurfaceWithFormat(0, w, h, 24, SDL_PIXELFORMAT_RGB24);
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    Uint8 *px = static_cast<Uint8 *>(c->pixels) + y * c->pitch + x * 3;
+                    px[0] = static_cast<Uint8>(x); px[1] = static_cast<Uint8>(y); px[2] = 120;
+                }
+            EXPECT(SDL_SaveBMP(c, file.string().c_str()) == 0);
+            SDL_FreeSurface(c);
+        };
+        make(data / "System" / "Art" / "TitleScreen.bmp", 320, 240);   // the one to pick (name + size)
+        make(data / "System" / "Art" / "wall.bmp", 400, 300);          // bigger, but a worse name
+        make(data / "System" / "Art" / "icon.bmp", 32, 32);            // far too small, must be ignored
+        App app(gfx, data, {});
+        app.debug_wait_scan();
+        shot.save(app, "13b_play_found_picture");
+        std::ifstream in(data / "cover_choice.txt");
+        std::string chosen;
+        std::getline(in, chosen);
+        EXPECT(chosen.find("TitleScreen.bmp") != std::string::npos);
+    }
+
     fs::remove_all(tmp);
     std::printf("%s (%d failure(s))\n", g_fail ? "FAILED" : "ok", g_fail);
     gfx.shutdown();

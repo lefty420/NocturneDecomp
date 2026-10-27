@@ -3,9 +3,21 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../third_party/stb_truetype.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_NO_STDIO
+#define STBI_NO_HDR
+#define STBI_NO_LINEAR
+#define STBI_NO_GIF
+#define STBI_NO_PSD
+#define STBI_NO_PIC
+#define STBI_NO_PNM
+#include "../third_party/stb_image.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -351,6 +363,29 @@ SDL_Texture *Gfx::load_bmp(const std::string &path, int *w, int *h) {
     if (h) *h = surf->h;
     SDL_FreeSurface(surf);
     if (tex) SDL_SetTextureScaleMode(tex, SDL_ScaleModeLinear);
+    return tex;
+}
+
+// PNG, JPEG, BMP or TGA, decoded here so a picture from the game's own folder can be used. Nothing is loaded
+// that is smaller than min_side on its short side or larger than 8192 on its long side.
+SDL_Texture *Gfx::load_image(const std::string &path, int *w, int *h, int min_side) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return nullptr;
+    const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (bytes.empty() || bytes.size() > (48u << 20)) return nullptr;
+    int iw = 0, ih = 0, comp = 0;
+    if (!stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &iw, &ih, &comp)) return nullptr;
+    if (std::min(iw, ih) < min_side || std::max(iw, ih) > 8192) return nullptr;
+    unsigned char *px = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &iw, &ih, &comp, 4);
+    if (!px) return nullptr;
+    SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormatFrom(px, iw, ih, 32, iw * 4, SDL_PIXELFORMAT_RGBA32);
+    SDL_Texture *tex = surf ? SDL_CreateTextureFromSurface(r_, surf) : nullptr;
+    if (surf) SDL_FreeSurface(surf);
+    stbi_image_free(px);
+    if (!tex) return nullptr;
+    if (w) *w = iw;
+    if (h) *h = ih;
+    SDL_SetTextureScaleMode(tex, SDL_ScaleModeLinear);
     return tex;
 }
 

@@ -116,3 +116,7 @@ log covers only the Xbox port and its launcher.
 - Optional picture improvements (FSR-style sharpening upscale, anti-aliasing, integer or CRT scaling) are
   possible and not started. HDR is unlikely to be possible through this graphics layer.
 - A true 16:9 render resolution depends on the game's own menus and layouts handling it; untested.
+
+## Box art comes from the player's own files
+
+The package no longer carries a picture. The launcher looks for `cover.png` / `.jpg` / `.bmp` / `.tga` in the app's data folder (or its `Assets` folder), then for the picture it chose before (`cover_choice.txt`), then searches the game files for the best candidate (names such as cover, box, title, logo, menu, loading rank first, then bigger files; anything under 30 KB or 200 px is ignored). PNG, JPEG, BMP and TGA are decoded with stb_image (public domain).
