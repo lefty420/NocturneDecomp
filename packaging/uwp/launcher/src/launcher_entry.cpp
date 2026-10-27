@@ -94,9 +94,11 @@ static void seed_game_defaults() {
     const std::filesystem::path game = nl::effective_data_dir(root);
     const std::filesystem::path sys = nl::find_ci(game, "System");
     if (sys.empty()) return;
-    const std::filesystem::path ini = nl::find_ci(sys, "nocturne.ini");
-    if (ini.empty()) return;
-    note_defaults("nocturne.ini", nl::apply_preset(defaults_dir() / "nocturne.ini", ini, false, root / "defaults_nocturne.version"));
+    // A fresh set of game files may not have a settings file yet (the game writes one on its first run), so make
+    // it from the defaults rather than waiting: the very first start then already has the shipped settings.
+    std::filesystem::path ini = nl::find_ci(sys, "nocturne.ini");
+    if (ini.empty()) ini = sys / "nocturne.ini";
+    note_defaults("nocturne.ini", nl::apply_preset(defaults_dir() / "nocturne.ini", ini, true, root / "defaults_nocturne.version"));
 }
 
 static void log_crash(const char *tag, PEXCEPTION_POINTERS ep) {
