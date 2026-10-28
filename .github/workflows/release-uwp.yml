@@ -36,7 +36,12 @@ jobs:
           sha=$(git rev-parse HEAD)
           run=$(gh run list --workflow uwp-link.yml --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId')
           if [ -z "$run" ]; then
-            echo "::error::No successful uwp-link run for commit $sha. Wait for the build of that commit to finish, then publish again."
+            # docs/workflow-only commits do not start a build; fall back to the newest green build
+            run=$(gh run list --workflow uwp-link.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+            echo "::warning::no build for $sha; using the newest successful uwp-link run $run"
+          fi
+          if [ -z "$run" ]; then
+            echo "::error::No successful uwp-link run found."
             exit 1
           fi
           echo "using uwp-link run $run"
