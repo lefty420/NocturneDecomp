@@ -14,7 +14,13 @@
 
 #include "core/crash_report.h"
 
-#if defined(_WIN32) && !defined(NOCTURNE_UWP_LAUNCHER)   // UWP has its own start-up log and crash note (launcher_entry.cpp)
+#if defined(NOCTURNE_UWP_LAUNCHER)
+
+// UWP has its own start-up log and crash note (launcher_entry.cpp), so there is nothing to install here.
+extern "C" void nocturne_install_crash_handler(const char *version) { (void)version; }
+extern "C" void nocturne_crash_report_set_dir(const char *dir) { (void)dir; }
+
+#elif defined(_WIN32)
 
 #define WIN32_LEAN_AND_MEAN
 #include <cstdarg>

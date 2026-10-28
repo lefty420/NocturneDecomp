@@ -172,7 +172,6 @@ std::string resolve(const char *path, WatcomPathUse use) {
     }
     return r.data.empty() ? resolve_case_insensitive(relative) : under(r.data, relative);
 }
-}  // namespace
 
 // What each read found, for asking again without the walk: the game opens the
 // same files over and over, and every resolution is a few filesystem calls.
