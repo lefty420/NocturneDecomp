@@ -44,7 +44,11 @@ set(_test_font "${sdl2_ttf_SOURCE_DIR}/external/harfbuzz/perf/fonts/Roboto-Regul
 set_property(GLOBAL APPEND PROPERTY NOCTURNE_TEST_BUNDLE_FILES "${_test_font}")
 if(WIN32)
     get_filename_component(_test_font_name "${_test_font}" NAME)
-    configure_file("${_test_font}" "${CMAKE_CURRENT_BINARY_DIR}/${_test_font_name}" COPYONLY)
+    # The UWP build uses a prebuilt SDL_ttf, so there is no source tree to take the font from; the tests
+    # are not built there, and configuring must not fail over a file only they use.
+    if(EXISTS "${_test_font}")
+        configure_file("${_test_font}" "${CMAKE_CURRENT_BINARY_DIR}/${_test_font_name}" COPYONLY)
+    endif()
     set(_test_font_define "NOCTURNE_TEST_FONT=\"${_test_font_name}\"")
 else()
     set(_test_font_define "NOCTURNE_TEST_FONT=\"${_test_font}\"")
