@@ -1,5 +1,5 @@
-#include <vector>
 #include <string>
+#include <vector>
 
 // =============================================================================
 // WATCOM SHIM - Watcom C++ runtime and CRT bridge implementations
@@ -12,18 +12,22 @@
 // These were previously inline functions in system/watcom.h.
 //
 
+#include "core/file_search.h" // nocturne_find_files() — shared with kernel32
+#include "system/dos.h"       // _find_t, which a search fills in
 #include "system/watcom.h"
-#include "core/file_search.h"   // nocturne_find_files() — shared with kernel32
-#include "watcom/path.h"        // watcom_resolve_fs_path()
+#include "watcom/path.h" // watcom_resolve_fs_path()
 
 #include <cerrno>
 #include <chrono>
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <chrono>
 #include <filesystem>
+#include <mutex>
 #include <system_error>
 #include <thread>
+#include <unordered_map>
 // The descriptor-based half of Watcom's io.h — here just lseek and ftruncate.
 // A file descriptor is not POSIX-only: Windows' own runtime has both, as _lseek
 // and _chsize in <io.h>, so this is a spelling difference rather than a port.
@@ -40,38 +44,42 @@
 // WATCOM_TRAMPOLINE is defined in system/watcom.h — see the comment there.
 
 WATCOM_TRAMPOLINE
-void* __arrinit(void* array_start, int count, WatcomTypeInfo* ti) {
-    char* p = (char*)array_start;
+void *__arrinit(void *array_start, int count, WatcomTypeInfo *ti) {
+    char *p = (char *)array_start;
     for (int i = 0; i < count; i++, p += ti->instance_size)
-        if (ti->ctor) (*ti->ctor)(p);
+        if (ti->ctor)
+            (*ti->ctor)(p);
     return array_start;
 }
 
-void* __arrinit_(void* array_start, int count, WatcomTypeInfo* ti) {
+void *__arrinit_(void *array_start, int count, WatcomTypeInfo *ti) {
     return __arrinit(array_start, count, ti);
 }
 
-void* __arrinit_dispatch(void* array_ptr, int count, WatcomTypeInfo* ti) {
-    if (!array_ptr) return 0;
+void *__arrinit_dispatch(void *array_ptr, int count, WatcomTypeInfo *ti) {
+    if (!array_ptr)
+        return 0;
     return __arrinit(array_ptr, count, ti);
 }
 
-void* __vec_new_(void* dest, int count, WatcomTypeInfo* ti) {
-    if (!dest) return 0;
-    *(int*)dest = count;
-    return __arrinit_dispatch((char*)dest + 4, count, ti);
+void *__vec_new_(void *dest, int count, WatcomTypeInfo *ti) {
+    if (!dest)
+        return 0;
+    *(int *)dest = count;
+    return __arrinit_dispatch((char *)dest + 4, count, ti);
 }
 
-void* __vec_new(void* dest, int count, WatcomTypeInfo* ti) {
+void *__vec_new(void *dest, int count, WatcomTypeInfo *ti) {
     return __vec_new_(dest, count, ti);
 }
 
 WATCOM_TRAMPOLINE
-void* __arrcopy(void* dest, void* src, int count, WatcomTypeInfo* ti) {
-    char* d = (char*)dest;
-    char* s = (char*)src;
+void *__arrcopy(void *dest, void *src, int count, WatcomTypeInfo *ti) {
+    char *d = (char *)dest;
+    char *s = (char *)src;
     for (int i = 0; i < count; i++, d += ti->instance_size, s += ti->instance_size)
-        if (ti->copy) (*ti->copy)(d, s);
+        if (ti->copy)
+            (*ti->copy)(d, s);
     return dest;
 }
 
@@ -82,25 +90,28 @@ void* __arrcopy(void* dest, void* src, int count, WatcomTypeInfo* ti) {
 // =============================================================================
 
 WATCOM_TRAMPOLINE
-void* __arrdtor(WatcomTypeArrayInfo* info) {
-    char* p = (char*)info->obj_array + (info->obj_count - 1) * info->type_info->instance_size;
+void *__arrdtor(WatcomTypeArrayInfo *info) {
+    char *p =
+        (char *)info->obj_array + (ptrdiff_t)(info->obj_count - 1) * info->type_info->instance_size;
     for (int i = info->obj_count - 1; i >= 0; i--, p -= info->type_info->instance_size)
-        if (info->type_info->dtor) (*info->type_info->dtor)(p, 0);
-    return info->obj_array;
+        if (info->type_info->dtor)
+            (*info->type_info->dtor)(p, 0);
+    return (void *)info->obj_array;
 }
 
-void* __arrfini(void* obj_array, int count, WatcomTypeInfo* ti) {
+void *__arrfini(void *obj_array, int count, WatcomTypeInfo *ti) {
     WatcomTypeArrayInfo info;
     info.obj_count = count;
     info.type_info = ti;
-    info.obj_array = (void**)obj_array;
+    info.obj_array = (void **)obj_array;
     __arrdtor(&info);
     return obj_array;
 }
 
-void* __vec_delete(void* ptr, WatcomTypeInfo* ti) {
-    if (!ptr) return 0;
-    int* base = ((int*)ptr) - 1;
+void *__vec_delete(void *ptr, WatcomTypeInfo *ti) {
+    if (!ptr)
+        return 0;
+    int *base = ((int *)ptr) - 1;
     __arrfini(ptr, *base, ti);
     return base;
 }
@@ -109,14 +120,16 @@ void* __vec_delete(void* ptr, WatcomTypeInfo* ti) {
 // Memory Helper Functions
 // =============================================================================
 
-void __memfill(void* dest, unsigned int value, unsigned int count) {
-    unsigned char* p = (unsigned char*)dest;
-    for (unsigned int i = 0; i < count; i++) *p++ = (unsigned char)value;
+void __memfill(void *dest, unsigned int value, unsigned int count) {
+    unsigned char *p = (unsigned char *)dest;
+    for (unsigned int i = 0; i < count; i++)
+        *p++ = (unsigned char)value;
 }
 
-void __stosd(void* dest, unsigned int value, unsigned int dword_count) {
-    unsigned int* p = (unsigned int*)dest;
-    for (unsigned int i = 0; i < dword_count; i++) *p++ = value;
+void __stosd(void *dest, unsigned int value, unsigned int dword_count) {
+    unsigned int *p = (unsigned int *)dest;
+    for (unsigned int i = 0; i < dword_count; i++)
+        *p++ = value;
 }
 
 // =============================================================================
@@ -130,19 +143,23 @@ void notifyAbnormalTermination() {
 void __STK() {}
 
 void __STK(size_t size) {
-    volatile char* p = (volatile char*)&size;
-    while (size > 4096) { p -= 4096; (void)*p; size -= 4096; }
+    volatile char *p = (volatile char *)&size;
+    while (size > 4096) {
+        p -= 4096;
+        (void)*p;
+        size -= 4096;
+    }
 }
 
 // =============================================================================
 // Watcom CRT Wrappers (io.h)
 // =============================================================================
 
-void* _memcpy(void* dest, const void* src, size_t count) {
+void *_memcpy(void *dest, const void *src, size_t count) {
     return memcpy(dest, src, count);
 }
 
-void* _memset(void* dest, int value, size_t count) {
+void *_memset(void *dest, int value, size_t count) {
     return memset(dest, value, count);
 }
 
@@ -169,9 +186,29 @@ int chsize(int fd, long size) {
 #endif
 }
 
-char* _fullpath(char* buffer, const char* path, size_t maxlen) {
-    if (buffer == 0) buffer = (char*)malloc(maxlen ? maxlen : 4096);
-    if (buffer == 0) return 0;
+// A buffer that is too small is ERANGE and no answer, never a cut-down path:
+// the caller would open what it was given. Without a buffer, one the size of
+// the answer is allocated and the length is not a limit.
+static char *copy_out(char *buffer, size_t room, const std::string &text) {
+#if defined(_WIN32)
+    if (buffer == 0)
+        return _strdup(text.c_str());
+#else
+    if (buffer == 0)
+        return strdup(text.c_str());
+#endif
+    if (text.size() + 1 > room) {
+        errno = ERANGE;
+        return 0;
+    }
+    memcpy(buffer, text.c_str(), text.size() + 1);
+    return buffer;
+}
+
+char *_fullpath(char *buffer, const char *path, size_t maxlen) {
+    // No path at all is the working directory, as in Watcom.
+    if (path == 0 || *path == '\0')
+        path = ".";
     // Watcom's _fullpath answers even for a path that does not exist yet, which
     // is what the game asks it for — a place to write. weakly_canonical does
     // the same, resolving as far as the filesystem goes and taking the rest
@@ -182,22 +219,17 @@ char* _fullpath(char* buffer, const char* path, size_t maxlen) {
     std::error_code ec;
     const std::filesystem::path full =
         std::filesystem::weakly_canonical(std::filesystem::path(watcom_resolve_fs_path(path)), ec);
-    const std::string text = ec ? std::string(path) : full.string();
-    const size_t room = maxlen ? maxlen : 4096;
-    if (text.size() + 1 > room) {
-        strcpy(buffer, path);
-        return buffer;
-    }
-    memcpy(buffer, text.c_str(), text.size() + 1);
-    return buffer;
+    return copy_out(buffer, maxlen, ec ? std::string(path) : full.string());
 }
 
-char* _getcwd(char* buffer, int size) {
+char *_getcwd(char *buffer, int size) {
     std::error_code ec;
     const std::string here = std::filesystem::current_path(ec).string();
-    if (ec || size <= 0 || here.size() + 1 > (size_t)size) return 0;
-    memcpy(buffer, here.c_str(), here.size() + 1);
-    return buffer;
+    if (ec) {
+        errno = ec.value();
+        return 0;
+    }
+    return copy_out(buffer, size > 0 ? (size_t)size : 0, here);
 }
 
 // =============================================================================
@@ -225,49 +257,89 @@ struct FindHandle {
     size_t current_index;
 };
 
-}  // namespace
+// What the caller reads back about each match: its name without the directory,
+// size, the directory and read-only bits, and when it was written. The host
+// keeps no creation or access time this can portably read, which is -1, as the
+// Microsoft runtime answers for a filesystem without them.
+void describe(const std::string &match, void *fileinfo) {
+    namespace fs = std::filesystem;
+    _find_t *out = (_find_t *)fileinfo;
+    if (out == 0)
+        return;
+    memset(out, 0, sizeof(*out));
+    snprintf(out->name, sizeof(out->name), "%s", watcom_path_leaf(match.c_str()));
+    out->cr_time = -1;
+    out->ac_time = -1;
 
-long _findfirst(const char* filespec, void* fileinfo) {
-    (void)fileinfo;
+    // Listed but not there to ask about, such as a link to nothing: the name is
+    // all there is.
+    const fs::path path(watcom_resolve_fs_path(match.c_str()));
+    std::error_code ec;
+    const uintmax_t size = fs::is_directory(path, ec) ? 0 : fs::file_size(path, ec);
+    const fs::file_time_type written = fs::last_write_time(path, ec);
+    if (ec)
+        return;
 
+    out->attrib = (uchar)__getfileattr(match.c_str());
+    out->size = (long)size;
+    // C++17 has no conversion between the two clocks; their offset now is it.
+    const auto since = written - fs::file_time_type::clock::now();
+    out->wr_time = std::chrono::system_clock::to_time_t(
+        std::chrono::system_clock::now() +
+        std::chrono::duration_cast<std::chrono::system_clock::duration>(since));
+}
+
+// The handle is a `long`, which is 32 bits on Windows even in a 64-bit build,
+// so it cannot carry a pointer. Open searches live in a table instead, keyed
+// by a number that counts up from 1: never 0 or -1, which are not handles.
+std::mutex s_find_mutex;
+std::unordered_map<long, FindHandle> s_find_handles;
+long s_next_find_handle = 1;
+
+} // namespace
+
+long _findfirst(const char *filespec, void *fileinfo) {
     std::vector<std::string> matches = nocturne_find_files(filespec);
-    if (matches.empty()) return -1;
+    if (matches.empty())
+        return -1;
+    describe(matches[0], fileinfo);
 
-    FindHandle* handle = new FindHandle();
-    handle->matches = matches;
-    handle->current_index = 0;
-    return (long)(intptr_t)handle;
+    std::lock_guard<std::mutex> held(s_find_mutex);
+    const long handle_val = s_next_find_handle;
+    s_next_find_handle = s_next_find_handle % LONG_MAX + 1;
+    s_find_handles[handle_val] = FindHandle{std::move(matches), 0};
+    return handle_val;
 }
 
 // -1 is what _findfirst returns when it found nothing, so it is the value most
 // likely to arrive here by mistake — from a caller that did not check, or one
-// that passed the failure straight on. It is not a handle, and dereferencing it
-// is a fault rather than a wrong answer. Zero is not a handle either.
-static bool is_find_handle(long handle_val) {
-    return handle_val != -1 && handle_val != 0;
-}
+// that passed the failure straight on. Like any number _findfirst never handed
+// out, or one already closed, it is answered as no search at all.
+int _findnext(long handle_val, void *fileinfo) {
+    std::lock_guard<std::mutex> held(s_find_mutex);
+    auto found = s_find_handles.find(handle_val);
+    if (found == s_find_handles.end())
+        return -1;
 
-int _findnext(long handle_val, void* fileinfo) {
-    (void)fileinfo;
-    if (!is_find_handle(handle_val)) return -1;
-    FindHandle* handle = (FindHandle*)(intptr_t)handle_val;
-
-    handle->current_index++;
-    if (handle->current_index >= handle->matches.size()) return -1;
+    FindHandle &handle = found->second;
+    // Held at the end, so a caller that keeps asking keeps hearing -1.
+    if (handle.current_index + 1 >= handle.matches.size())
+        return -1;
+    handle.current_index++;
+    describe(handle.matches[handle.current_index], fileinfo);
     return 0;
 }
 
 int _findclose(long handle_val) {
-    if (!is_find_handle(handle_val)) return -1;
-    delete (FindHandle*)(intptr_t)handle_val;
-    return 0;
+    std::lock_guard<std::mutex> held(s_find_mutex);
+    return s_find_handles.erase(handle_val) == 1 ? 0 : -1;
 }
 
 // =============================================================================
 // Directory Functions (direct.h)
 // =============================================================================
 
-int _mkdir(const char* path) {
+int _mkdir(const char *path) {
     std::error_code ec;
     // Watcom answers 0 for success and -1 otherwise, including when the
     // directory is already there.
@@ -279,44 +351,38 @@ int _mkdir(const char* path) {
 // File Attribute Functions (io.h)
 // =============================================================================
 
-#if !defined(_WIN32)
-
 // Watcom maps the mode onto the one attribute Windows has: read-only unless
-// S_IWRITE (0x80) is set. Owner write is the POSIX equivalent.
-int _chmod(const char* path, int mode) {
+// S_IWRITE (0x80) is set. Writable gives the owner write; read-only takes write
+// from everyone, since Microsoft's std::filesystem sets the attribute only once
+// no write bit is left.
+int _chmod(const char *path, int mode) {
     namespace fs = std::filesystem;
     std::error_code ec;
-    fs::permissions(fs::path(watcom_resolve_fs_path(path)), fs::perms::owner_write,
-                    (mode & 0x80) ? fs::perm_options::add : fs::perm_options::remove, ec);
+    const bool writable = (mode & 0x80) != 0;
+    fs::permissions(fs::path(watcom_resolve_fs_path(path)),
+                    writable
+                        ? fs::perms::owner_write
+                        : fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write,
+                    writable ? fs::perm_options::add : fs::perm_options::remove, ec);
     if (ec) {
-        errno = ec.value();
+        // Windows reports its own error numbers; the condition is the errno.
+        errno = ec.default_error_condition().value();
         return -1;
     }
     return 0;
 }
-
-#endif
-
-#if defined(_MSC_VER)
-// The game's startup calls _chmod("stderr.txt", ...) on a file that sits under the data root, which
-// the UCRT's own _chmod would look for in the working directory and report as missing. Resolve first.
-#undef _chmod
-int nocturne_watcom_chmod(const char* path, int mode) {
-    return ::_chmod(watcom_resolve_fs_path(path).c_str(), mode);
-}
-#endif
 
 // =============================================================================
 // Heap Functions (malloc.h)
 // =============================================================================
 
 int _heapchk(void) {
-    return 0;  // _HEAPOK
+    return 0; // _HEAPOK
 }
 
-int _heapwalk(struct WatcomHeapInfo* entry) {
+int _heapwalk(struct WatcomHeapInfo *entry) {
     (void)entry;
-    return 4;  // _HEAPEND
+    return 4; // _HEAPEND
 }
 
 size_t _memmax(void) {
@@ -331,20 +397,23 @@ size_t memavl(void) {
 // Watcom Internal CRT Functions
 // =============================================================================
 
-unsigned long __getfileattr(const char* filename) {
+unsigned long __getfileattr(const char *filename) {
     std::error_code ec;
     const std::filesystem::path path(watcom_resolve_fs_path(filename));
     const std::filesystem::file_status status = std::filesystem::status(path, ec);
-    if (ec || !std::filesystem::exists(status)) return 0xFFFFFFFF;  // INVALID_FILE_ATTRIBUTES
+    // A status that could not be read is not known to exist.
+    if (!std::filesystem::exists(status))
+        return 0xFFFFFFFF; // INVALID_FILE_ATTRIBUTES
 
     unsigned long attrs = 0;
-    if (std::filesystem::is_directory(status)) attrs |= 0x10;  // DIRECTORY
+    if (std::filesystem::is_directory(status))
+        attrs |= 0x10; // DIRECTORY
     // Windows has one read-only bit for the file; POSIX has three write bits for
     // three audiences. The owner's is the one that decides whether this process
     // can write, which is the question the attribute is asked to answer.
     if ((status.permissions() & std::filesystem::perms::owner_write) ==
         std::filesystem::perms::none) {
-        attrs |= 0x01;  // FILE_ATTRIBUTE_READONLY
+        attrs |= 0x01; // FILE_ATTRIBUTE_READONLY
     }
     return attrs;
 }
@@ -357,7 +426,7 @@ unsigned long __set_errno(void) {
 // it under this exact name and meaning — its <errno.h> defines errno as
 // (*_errno()) — so defining it here as well would be a duplicate symbol.
 #if !defined(_WIN32)
-int* _errno(void) {
+int *_errno(void) {
     return &errno;
 }
 #endif
@@ -366,7 +435,7 @@ int* _errno(void) {
 // Static Destructor Registration
 // =============================================================================
 
-void _atexit(WatcomStaticDestructorNode* node) {
+void _atexit(WatcomStaticDestructorNode *node) {
     (void)node;
     // In a full runtime, this would register the destructor for atexit() cleanup.
     // For now, static destructors are not critical for execution.

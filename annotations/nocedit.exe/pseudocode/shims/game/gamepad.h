@@ -80,19 +80,19 @@ extern "C" {
 // The reserved button span, independent of the SDL actually linked.
 #define NOCTURNE_PAD_BUTTON_SPAN 26
 
-#define NOCTURNE_PAD_LTRIGGER    (NOCTURNE_PAD_BUTTON_BASE + NOCTURNE_PAD_BUTTON_SPAN + 0)
-#define NOCTURNE_PAD_RTRIGGER    (NOCTURNE_PAD_BUTTON_BASE + NOCTURNE_PAD_BUTTON_SPAN + 1)
-#define NOCTURNE_PAD_RSTICK_UP   (NOCTURNE_PAD_BUTTON_BASE + NOCTURNE_PAD_BUTTON_SPAN + 2)
+#define NOCTURNE_PAD_LTRIGGER (NOCTURNE_PAD_BUTTON_BASE + NOCTURNE_PAD_BUTTON_SPAN + 0)
+#define NOCTURNE_PAD_RTRIGGER (NOCTURNE_PAD_BUTTON_BASE + NOCTURNE_PAD_BUTTON_SPAN + 1)
+#define NOCTURNE_PAD_RSTICK_UP (NOCTURNE_PAD_BUTTON_BASE + NOCTURNE_PAD_BUTTON_SPAN + 2)
 #define NOCTURNE_PAD_RSTICK_DOWN (NOCTURNE_PAD_BUTTON_BASE + NOCTURNE_PAD_BUTTON_SPAN + 3)
 #define NOCTURNE_PAD_RSTICK_LEFT (NOCTURNE_PAD_BUTTON_BASE + NOCTURNE_PAD_BUTTON_SPAN + 4)
 #define NOCTURNE_PAD_RSTICK_RIGHT (NOCTURNE_PAD_BUTTON_BASE + NOCTURNE_PAD_BUTTON_SPAN + 5)
 
 // One past the last pad code. Everything in [BASE, END) is a pad code.
-#define NOCTURNE_PAD_CODE_END    (NOCTURNE_PAD_BUTTON_BASE + NOCTURNE_PAD_BUTTON_SPAN + 6)
+#define NOCTURNE_PAD_CODE_END (NOCTURNE_PAD_BUTTON_BASE + NOCTURNE_PAD_BUTTON_SPAN + 6)
 
 // True for any code this shim owns. The left stick is not among them: it keeps
 // the original DIJ_LEFT/RIGHT/UP/DOWN.
-#define NOCTURNE_PAD_IS_CODE(code) \
+#define NOCTURNE_PAD_IS_CODE(code)                                                                 \
     ((code) >= NOCTURNE_PAD_BUTTON_BASE && (code) < NOCTURNE_PAD_CODE_END)
 
 // ---------------------------------------------------------------------------
@@ -135,12 +135,18 @@ int nocturne_gamepad_present(void);
 // call.
 void nocturne_gamepad_suppress_nav(int suppress);
 
+// Take back a navigation press of `code` that nothing has consumed yet, for a
+// screen where the pad's button should not mean what the key does. The main
+// menu's front page is the case: Escape there quits the game, and the pad's
+// cancel would otherwise quit it from a B or Start press with no prompt. A
+// keyboard press of the same code is left alone.
+void nocturne_gamepad_withdraw_nav(int code);
+
 // Deadzoned, rescaled stick and trigger values for the analogue path.
 // Sticks are -1..1 with y positive downwards (SDL's sign, which is also the
 // engine's for look_up_down_speed); triggers are 0..1. Any pointer may be
 // null. All zero when no pad is present.
-void nocturne_gamepad_axes(float *move_x, float *move_y,
-                           float *look_x, float *look_y,
+void nocturne_gamepad_axes(float *move_x, float *move_y, float *look_x, float *look_y,
                            float *left_trigger, float *right_trigger);
 
 // The name to show for a pad code on the Customize Keys screen, in the labels

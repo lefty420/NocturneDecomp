@@ -7,7 +7,7 @@ name: uwp-link
 on:
   workflow_dispatch:
   push:
-    branches: [xbox-uwp-gles-groundwork]
+    branches: [xbox-uwp-gles-groundwork, sync-upstream]
     paths:
       - '.github/workflows/uwp-link.yml'
       - 'cmake/uwp_libs.cmake'

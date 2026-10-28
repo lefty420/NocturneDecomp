@@ -10,8 +10,9 @@
 // Responsibilities:
 //   0. On Windows, catch an unhandled fault and leave a crash report
 //      (core/crash_report.h) rather than vanishing.
-//   1. Choose the data and user directories (core/path_roots.h), then
-//      initialize the cross-platform Win32 shim function pointers.
+//   1. Choose the data and user directories (core/path_roots.h), stop with a
+//      message if the game's files are not there, then initialize the
+//      cross-platform Win32 shim function pointers.
 //   2. Synthesize the HINSTANCE/cmdline arguments the decompiled winMain
 //      expects.
 //   3. Hand control to the decompiled winMain and propagate its exit code.
@@ -27,6 +28,14 @@
 #endif
 #include <cstdio>
 #include <cstring>
+
+// Where SDL runs the app from an entry point of its own (WinRT, and SDL's ports
+// that do the same), it calls SDL_main, and its header names main below so.
+// NOCTURNE_PLATFORM_SDL_MAIN in the platform file asks for it
+// (cmake/game_modules.cmake).
+#if defined(NOCTURNE_SDL_MAIN)
+#include <SDL_main.h>
+#endif
 
 // Entries 0..155 are game static initializers (actor registration, vtable
 // setup, etc.); entry 0 registers CDemonActor. Entries 156..166 are Watcom CRT
@@ -85,14 +94,17 @@ int main(int argc, char** argv)
     nocturne_boot_log("--- start: SDL_main entered, launcher next");
     if (!nocturne_uwp_run_launcher()) { nocturne_boot_log("launcher: player quit"); return 0; }
     nocturne_boot_log("launcher done, starting the game");
-#endif
-#ifdef NOCTURNE_UWP_LAUNCHER
     nocturne_boot_log("shims_init_all: begin");
+#else
+    if (nocturne_check_game_data() == 0) {
+        return 1;
+    }
 #endif
     shims_init_all();
 #ifdef NOCTURNE_UWP_LAUNCHER
     nocturne_boot_log("shims_init_all: done, static initializers: begin");
 #endif
+    shims_set_command_line(argc, argv);
     runStaticInitializers();
 #ifdef NOCTURNE_UWP_LAUNCHER
     nocturne_boot_log("shims and static initializers done, entering the game");

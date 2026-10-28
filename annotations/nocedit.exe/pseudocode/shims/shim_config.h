@@ -29,11 +29,11 @@
 // The toggles. Authenticity first: NOCTURNE_AUTHENTIC_NETPLAY and
 // NOCTURNE_AUTHENTIC_RNG gate features whose own config headers follow.
 #include "config/shim_config_authentic.h"
+#include "config/shim_config_debug.h"
+#include "config/shim_config_input.h"
+#include "config/shim_config_media.h"
 #include "config/shim_config_netplay.h"
 #include "config/shim_config_video.h"
-#include "config/shim_config_media.h"
-#include "config/shim_config_input.h"
-#include "config/shim_config_debug.h"
 
 // =============================================================================
 // SHIM API DECLARATIONS
@@ -95,6 +95,10 @@ void nocturne_trigl_envmap_pass_end(void);
 // NOCTURNE_AUTHENTIC_WINDOW_MESSAGES.
 #include "win32/window_message.h"
 
+// The text prompts asking for SDL's text input (nocturne_text_input_*) —
+// declared here so the editor-tools TU reaches it through nocturne.h.
+#include "win32/text_input.h"
+
 // HUD scaling (nocturne_ui_*) — declared here so the HUD TUs reach it through
 // nocturne.h.
 #include "core/ui_scale.h"
@@ -133,6 +137,10 @@ void nocturne_trigl_envmap_pass_end(void);
 // when NOCTURNE_AUTHENTIC_GAMEPAD is 1, which leaves the shipped joyGetPos
 // path in charge.
 #include "game/gamepad.h"
+
+// The pad's tuning (nocturne_pad_tuning_*), stepped from the Control Options
+// screen in the menu TU.
+#include "game/pad_tuning.h"
 
 // Netplay configuration (nocturne_net_*) — declared here so the netgame TUs
 // reach it through nocturne.h.
@@ -249,8 +257,8 @@ void nocturne_trigl_envmap_pass_end(void);
 // also covers the sheathed-fire fall-through in the three melee classes — one
 // flag over the whole fire-button and grab surface of the classes the shipped
 // options screen never let anyone play.
-#include "game/hero_interact.h"
 #include "game/hero_grab.h"
+#include "game/hero_interact.h"
 
 // A player Svetlana can be grabbed (nocturne_svetlana_get_grabbed), from
 // CSvetlana::getGrabbed. Gated on NOCTURNE_AUTHENTIC_HERO_ACTIONS.

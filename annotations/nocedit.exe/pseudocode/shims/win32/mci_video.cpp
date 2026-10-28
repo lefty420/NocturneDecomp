@@ -40,26 +40,30 @@
 // failure mode (an 88-second movie consumed in 956ms) is not obvious from the
 // code.
 
-#include "system/mmsystem.h"
 #include "win32/mci_video.h"
-#include "gl/gl_present.h"
-#include "game/movie_audio.h"
+
 #include "core/debug_log.h"
+#include "game/movie_audio.h"
+#include "gl/gl_present.h"
+#include "system/mmsystem.h"
+
 #include <SDL.h>
 
 extern "C" {
-#include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
-#include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
+#include <libswscale/swscale.h>
 }
 
-#include <cstring>
-#include <cstdlib>
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <string>
+#include <vector>
 
 // The game hands MCI a Watcom-style path ("video\\opening.avi"); the CRT _fopen
 // shim resolves those against the real filesystem ('\\' -> '/' plus
@@ -94,23 +98,24 @@ extern "C" {
 
 struct MciVideoFrame {
     AVFrame *frame;
-    double   pts;      // seconds from start of stream
+    double pts; // seconds from start of stream
 };
 
 struct MciMovieState {
     // libav demuxer/decoder
-    AVFormatContext* fmt_ctx;
-    AVCodecContext* video_codec_ctx;
-    AVCodecContext* audio_codec_ctx;
+    AVFormatContext *fmt_ctx;
+    AVCodecContext *video_codec_ctx;
+    AVCodecContext *audio_codec_ctx;
     int video_stream_idx;
     int audio_stream_idx;
-    SwsContext* sws_ctx;
-    SwrContext* swr_ctx;
+    SwsContext *sws_ctx;
+    SwrContext *swr_ctx;
 
     // Decoded frame storage
-    AVFrame* frame;         // scratch for decode
-    AVFrame* frame_rgb;     // converted to RGB24 for display
-    uint8_t* rgb_buffer;
+    AVPacket *packet;   // scratch for the demuxer
+    AVFrame *frame;     // scratch for decode
+    AVFrame *frame_rgb; // converted to RGB24 for display
+    uint8_t *rgb_buffer;
 
     // Video frames decoded ahead of the clock, oldest first
     MciVideoFrame queue[MCI_VIDEO_QUEUE_FRAMES];
@@ -123,37 +128,35 @@ struct MciMovieState {
     double fps;
     double duration_sec;
     double video_time_base;
-    double next_synth_pts;  // used when the container gives no pts
+    double next_synth_pts; // used for a frame the decoder gives no timestamp
 
     // Playback state
     int is_open;
     int is_playing;
     int is_paused;
-    int at_eof;             // demuxer drained
-    int notified;           // MM_MCINOTIFY edge already reported
+    int at_eof; // demuxer drained, decoders told to flush
     int fullscreen;
 
     // SDL rendering
-    SDL_Texture* texture;
-    SDL_Renderer* renderer;
+    SDL_Texture *texture;
+    SDL_Renderer *renderer;
 
     // SDL audio
     SDL_AudioDeviceID audio_dev;
     int audio_bytes_per_sec;
-    uint64_t audio_bytes_queued;
     int audio_channels;
     int audio_rate;
 
     // Timing
     Uint32 play_start_ticks;
     Uint32 pause_ticks;
-    Uint32 drained_ticks;   // when video first ran out; 0 until then
+    Uint32 drained_ticks; // when video first ran out; 0 until then
 
     // Diagnostics
     unsigned dbg_packets;
     unsigned dbg_presented;
     unsigned dbg_dropped;
-    int      dbg_read_err;
+    int dbg_read_err;
 };
 
 static MciMovieState s_movie = {};
@@ -172,7 +175,9 @@ static void movie_queue_clear() {
     s_movie.queue_count = 0;
 }
 
-static void movie_close() {
+// Everything the sound needs, so the movie plays on silent: its packets are
+// ignored from here on.
+static void movie_close_audio() {
     // The SDL audio device has to be closed before the struct is cleared —
     // memset would drop the handle and leak the device for the process
     // lifetime, and a second movie would then open another one.
@@ -182,13 +187,17 @@ static void movie_close() {
         SDL_CloseAudioDevice(s_movie.audio_dev);
         s_movie.audio_dev = 0;
     }
+    swr_free(&s_movie.swr_ctx);
+    avcodec_free_context(&s_movie.audio_codec_ctx);
+    s_movie.audio_stream_idx = -1;
+}
+
+static void movie_close() {
+    movie_close_audio();
     movie_queue_clear();
     if (s_movie.texture) {
         SDL_DestroyTexture(s_movie.texture);
         s_movie.texture = nullptr;
-    }
-    if (s_movie.swr_ctx) {
-        swr_free(&s_movie.swr_ctx);
     }
     if (s_movie.sws_ctx) {
         sws_freeContext(s_movie.sws_ctx);
@@ -204,9 +213,7 @@ static void movie_close() {
     if (s_movie.frame) {
         av_frame_free(&s_movie.frame);
     }
-    if (s_movie.audio_codec_ctx) {
-        avcodec_free_context(&s_movie.audio_codec_ctx);
-    }
+    av_packet_free(&s_movie.packet);
     if (s_movie.video_codec_ctx) {
         avcodec_free_context(&s_movie.video_codec_ctx);
     }
@@ -221,37 +228,30 @@ static void movie_close() {
 // =============================================================================
 
 // Bring up the SDL audio device for the movie's audio stream and the resampler
-// that feeds it. Failure is non-fatal: the movie plays silently on the wall
-// clock instead.
-static void movie_open_audio() {
-    if (s_movie.audio_stream_idx < 0) return;
-
+// that feeds it. False leaves the caller to take down what was made; that is
+// not fatal, the movie plays silently on the wall clock instead.
+//
+// A stream with no rate never gets this far, the demuxer refuses it; one with
+// no channels is refused by its decoder or by the resampler.
+static bool movie_open_audio() {
     AVStream *st = s_movie.fmt_ctx->streams[s_movie.audio_stream_idx];
     const AVCodec *codec = avcodec_find_decoder(st->codecpar->codec_id);
-    if (!codec) return;
+    if (!codec)
+        return false;
 
     s_movie.audio_codec_ctx = avcodec_alloc_context3(codec);
-    if (!s_movie.audio_codec_ctx) return;
-    if (avcodec_parameters_to_context(s_movie.audio_codec_ctx, st->codecpar) < 0 ||
+    if (!s_movie.audio_codec_ctx ||
+        avcodec_parameters_to_context(s_movie.audio_codec_ctx, st->codecpar) < 0 ||
         avcodec_open2(s_movie.audio_codec_ctx, codec, nullptr) < 0) {
-        avcodec_free_context(&s_movie.audio_codec_ctx);
-        return;
+        return false;
     }
 
-    int channels = s_movie.audio_codec_ctx->ch_layout.nb_channels;
-    if (channels < 1) channels = 1;
-    if (channels > 2) channels = 2;   // SDL gets mono or stereo; downmix the rest
-    int rate = s_movie.audio_codec_ctx->sample_rate;
-    if (rate <= 0) {
-        avcodec_free_context(&s_movie.audio_codec_ctx);
-        return;
-    }
+    // SDL gets mono or stereo; the resampler downmixes the rest.
+    const int channels = std::min(s_movie.audio_codec_ctx->ch_layout.nb_channels, 2);
+    const int rate = s_movie.audio_codec_ctx->sample_rate;
 
-    if (!SDL_WasInit(SDL_INIT_AUDIO)) {
-        if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
-            avcodec_free_context(&s_movie.audio_codec_ctx);
-            return;
-        }
+    if (!SDL_WasInit(SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+        return false;
     }
 
     SDL_AudioSpec want, have;
@@ -261,40 +261,30 @@ static void movie_open_audio() {
     want.format = AUDIO_S16SYS;
     want.channels = (Uint8)channels;
     want.samples = 1024;
-    want.callback = nullptr;          // queue-driven, see SDL_QueueAudio below
+    want.callback = nullptr; // queue-driven, see SDL_QueueAudio below
     s_movie.audio_dev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
-    if (!s_movie.audio_dev) {
-        avcodec_free_context(&s_movie.audio_codec_ctx);
-        return;
-    }
+    if (!s_movie.audio_dev)
+        return false;
 
     // Resample whatever the file holds (S16/U8, planar or packed) to the
     // interleaved S16 the device was opened with. All the shipped movies are
     // already PCM, but going through swr keeps the path uniform.
     AVChannelLayout out_layout;
     av_channel_layout_default(&out_layout, channels);
-    int rc = swr_alloc_set_opts2(&s_movie.swr_ctx,
-                                 &out_layout, AV_SAMPLE_FMT_S16, rate,
-                                 &s_movie.audio_codec_ctx->ch_layout,
-                                 s_movie.audio_codec_ctx->sample_fmt,
-                                 s_movie.audio_codec_ctx->sample_rate,
-                                 0, nullptr);
+    int rc = swr_alloc_set_opts2(
+        &s_movie.swr_ctx, &out_layout, AV_SAMPLE_FMT_S16, rate, &s_movie.audio_codec_ctx->ch_layout,
+        s_movie.audio_codec_ctx->sample_fmt, s_movie.audio_codec_ctx->sample_rate, 0, nullptr);
     av_channel_layout_uninit(&out_layout);
-    if (rc < 0 || swr_init(s_movie.swr_ctx) < 0) {
-        if (s_movie.swr_ctx) swr_free(&s_movie.swr_ctx);
-        SDL_CloseAudioDevice(s_movie.audio_dev);
-        s_movie.audio_dev = 0;
-        avcodec_free_context(&s_movie.audio_codec_ctx);
-        return;
-    }
+    if (rc < 0 || swr_init(s_movie.swr_ctx) < 0)
+        return false;
 
     s_movie.audio_channels = channels;
     s_movie.audio_rate = rate;
-    s_movie.audio_bytes_per_sec = rate * channels * 2;  // S16 = 2 bytes/sample
-    s_movie.audio_bytes_queued = 0;
+    s_movie.audio_bytes_per_sec = rate * channels * 2; // S16 = 2 bytes/sample
+    return true;
 }
 
-static int movie_open(const char* filepath) {
+static int movie_open(const char *filepath) {
     movie_close();
 
     // Open file
@@ -306,64 +296,60 @@ static int movie_open(const char* filepath) {
         return -1;
     }
 
-    // Find video + audio streams
-    s_movie.video_stream_idx = -1;
-    s_movie.audio_stream_idx = -1;
-    for (unsigned i = 0; i < s_movie.fmt_ctx->nb_streams; i++) {
-        int type = s_movie.fmt_ctx->streams[i]->codecpar->codec_type;
-        if (type == AVMEDIA_TYPE_VIDEO && s_movie.video_stream_idx < 0) {
-            s_movie.video_stream_idx = (int)i;
-        } else if (type == AVMEDIA_TYPE_AUDIO && s_movie.audio_stream_idx < 0) {
-            s_movie.audio_stream_idx = (int)i;
-        }
-    }
+    // The picture, and the sound that goes with it. A movie may have neither
+    // sound nor any streams besides, whose packets are ignored.
+    s_movie.video_stream_idx =
+        av_find_best_stream(s_movie.fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
     if (s_movie.video_stream_idx < 0) {
         movie_close();
         return -1;
     }
+    s_movie.audio_stream_idx = std::max(av_find_best_stream(s_movie.fmt_ctx, AVMEDIA_TYPE_AUDIO, -1,
+                                                            s_movie.video_stream_idx, nullptr, 0),
+                                        -1);
 
     // Open video codec
-    AVCodecParameters* codecpar = s_movie.fmt_ctx->streams[s_movie.video_stream_idx]->codecpar;
-    const AVCodec* codec = avcodec_find_decoder(codecpar->codec_id);
+    AVStream *video = s_movie.fmt_ctx->streams[s_movie.video_stream_idx];
+    const AVCodec *codec = avcodec_find_decoder(video->codecpar->codec_id);
     if (!codec) {
         movie_close();
         return -1;
     }
 
     s_movie.video_codec_ctx = avcodec_alloc_context3(codec);
-    if (!s_movie.video_codec_ctx) {
-        movie_close();
-        return -1;
-    }
-    avcodec_parameters_to_context(s_movie.video_codec_ctx, codecpar);
-    if (avcodec_open2(s_movie.video_codec_ctx, codec, nullptr) < 0) {
+    if (!s_movie.video_codec_ctx ||
+        avcodec_parameters_to_context(s_movie.video_codec_ctx, video->codecpar) < 0 ||
+        avcodec_open2(s_movie.video_codec_ctx, codec, nullptr) < 0) {
         movie_close();
         return -1;
     }
 
     s_movie.width = s_movie.video_codec_ctx->width;
     s_movie.height = s_movie.video_codec_ctx->height;
-    if (s_movie.width <= 0 || s_movie.height <= 0) {
+    // A size the decoder could not use it has set to 0 by 0, so the width
+    // alone says.
+    if (s_movie.width <= 0) {
         movie_close();
         return -1;
     }
 
-    // Calculate FPS
-    AVRational tb = s_movie.fmt_ctx->streams[s_movie.video_stream_idx]->avg_frame_rate;
-    if (tb.num > 0 && tb.den > 0) {
-        s_movie.fps = (double)tb.num / (double)tb.den;
-    } else {
-        s_movie.fps = 15.0;
-    }
-    s_movie.video_time_base =
-        av_q2d(s_movie.fmt_ctx->streams[s_movie.video_stream_idx]->time_base);
+    // A container may not say its rate; the shipped movies' stands in. Only
+    // frames without a timestamp are timed by it.
+    const double fps = av_q2d(video->avg_frame_rate);
+    s_movie.fps = fps > 0.0 ? fps : 15.0;
+    s_movie.video_time_base = av_q2d(video->time_base);
 
-    // Duration
+    // Duration, for the log; a stream may not know it.
     if (s_movie.fmt_ctx->duration > 0) {
         s_movie.duration_sec = (double)s_movie.fmt_ctx->duration / AV_TIME_BASE;
     }
 
     // Allocate frames
+    s_movie.packet = av_packet_alloc();
+    if (!s_movie.packet) {
+        movie_close();
+        return -1;
+    }
     s_movie.frame = av_frame_alloc();
     s_movie.frame_rgb = av_frame_alloc();
     if (!s_movie.frame || !s_movie.frame_rgb) {
@@ -380,26 +366,26 @@ static int movie_open(const char* filepath) {
 
     // RGB conversion buffer
     int num_bytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, s_movie.width, s_movie.height, 1);
-    s_movie.rgb_buffer = (uint8_t*)av_malloc(num_bytes);
+    s_movie.rgb_buffer = (uint8_t *)av_malloc(num_bytes);
     if (!s_movie.rgb_buffer) {
         movie_close();
         return -1;
     }
-    av_image_fill_arrays(s_movie.frame_rgb->data, s_movie.frame_rgb->linesize,
-                         s_movie.rgb_buffer, AV_PIX_FMT_RGB24,
-                         s_movie.width, s_movie.height, 1);
+    av_image_fill_arrays(s_movie.frame_rgb->data, s_movie.frame_rgb->linesize, s_movie.rgb_buffer,
+                         AV_PIX_FMT_RGB24, s_movie.width, s_movie.height, 1);
 
     // SWS context for pixel format conversion
     s_movie.sws_ctx = sws_getContext(
-        s_movie.width, s_movie.height, s_movie.video_codec_ctx->pix_fmt,
-        s_movie.width, s_movie.height, AV_PIX_FMT_RGB24,
-        SWS_BILINEAR, nullptr, nullptr, nullptr);
+        s_movie.width, s_movie.height, s_movie.video_codec_ctx->pix_fmt, s_movie.width,
+        s_movie.height, AV_PIX_FMT_RGB24, SWS_BILINEAR, nullptr, nullptr, nullptr);
     if (!s_movie.sws_ctx) {
         movie_close();
         return -1;
     }
 
-    movie_open_audio();
+    if (s_movie.audio_stream_idx >= 0 && !movie_open_audio()) {
+        movie_close_audio();
+    }
 
     s_movie.is_open = 1;
     return 0;
@@ -426,50 +412,41 @@ static int movie_open(const char* filepath) {
 // picture-ahead-of-sound this shows under gdb, and it is the instrument rather
 // than the playback.
 static double movie_clock() {
-    Uint32 base = s_movie.is_paused ? s_movie.pause_ticks : SDL_GetTicks();
-    return (double)(base - s_movie.play_start_ticks) / 1000.0;
+    return (double)(SDL_GetTicks() - s_movie.play_start_ticks) / 1000.0;
 }
 
 // Convert a decoded audio frame and hand it to the device.
 static void movie_queue_audio(AVFrame *src) {
-    if (!s_movie.audio_dev || !s_movie.swr_ctx) return;
-
     // Input and output rates are the same (the device was opened at the file's
     // rate), so the only slack needed is whatever the resampler is still
     // holding — no rate rescale.
     int64_t delay = swr_get_delay(s_movie.swr_ctx, s_movie.audio_rate);
     int max_out = (int)(delay + src->nb_samples);
-    if (max_out <= 0) return;
+    std::vector<uint8_t> out((size_t)max_out * s_movie.audio_channels * 2);
+    uint8_t *out_buf = out.data();
 
-    int out_bytes = max_out * s_movie.audio_channels * 2;
-    uint8_t *out_buf = (uint8_t*)av_malloc(out_bytes);
-    if (!out_buf) return;
+    // An error converts nothing, and nothing is queued.
+    const int got = std::max(swr_convert(s_movie.swr_ctx, &out_buf, max_out,
+                                         (const uint8_t **)src->extended_data, src->nb_samples),
+                             0);
+    const int bytes = got * s_movie.audio_channels * 2;
 
-    int got = swr_convert(s_movie.swr_ctx, &out_buf, max_out,
-                          (const uint8_t**)src->extended_data, src->nb_samples);
-    if (got > 0) {
-        int bytes = got * s_movie.audio_channels * 2;
-
-        // The game's own level for movies, zero while sound is muted. Silence
-        // is still QUEUED rather than skipped: the end-of-movie test is
-        // "nothing left queued", and dropping the buffers instead of zeroing
-        // them would end a muted movie as soon as the device drained.
-        const float gain = nocturne_movie_audio_gain();
-        if (gain <= 0.0f) {
-            memset(out_buf, 0, (size_t)bytes);
-        } else if (gain < 1.0f) {
-            int16_t *samples = (int16_t *)out_buf;
-            const int count = got * s_movie.audio_channels;
-            for (int i = 0; i < count; i++) {
-                samples[i] = (int16_t)((float)samples[i] * gain);
-            }
-        }
-
-        if (SDL_QueueAudio(s_movie.audio_dev, out_buf, (Uint32)bytes) == 0) {
-            s_movie.audio_bytes_queued += (uint64_t)bytes;
+    // The game's own level for movies, zero while sound is muted. Silence is
+    // still QUEUED rather than skipped: the end-of-movie test is "nothing left
+    // queued", and dropping the buffers instead of zeroing them would end a
+    // muted movie as soon as the device drained.
+    const float gain = nocturne_movie_audio_gain();
+    if (gain <= 0.0f) {
+        memset(out_buf, 0, (size_t)bytes);
+    } else if (gain < 1.0f) {
+        int16_t *samples = (int16_t *)out_buf;
+        const int count = got * s_movie.audio_channels;
+        for (int i = 0; i < count; i++) {
+            samples[i] = (int16_t)((float)samples[i] * gain);
         }
     }
-    av_free(out_buf);
+
+    SDL_QueueAudio(s_movie.audio_dev, out_buf, (Uint32)bytes);
 }
 
 // Take one decoded video frame into the look-ahead queue. Caller guarantees
@@ -482,77 +459,61 @@ static void movie_queue_video(AVFrame *src, double pts) {
     s_movie.queue_count++;
 }
 
-// Drain whatever the decoders are still holding once the demuxer runs out.
-// Without this a codec with an internal delay would swallow its last frames and
-// the movie would cut short of its final image.
-static void movie_flush_decoders() {
-    if (s_movie.video_codec_ctx &&
-        avcodec_send_packet(s_movie.video_codec_ctx, nullptr) >= 0) {
-        while (s_movie.queue_count < MCI_VIDEO_QUEUE_FRAMES &&
-               avcodec_receive_frame(s_movie.video_codec_ctx, s_movie.frame) == 0) {
-            int64_t ts = s_movie.frame->best_effort_timestamp;
-            double pts = (ts != AV_NOPTS_VALUE && s_movie.video_time_base > 0.0)
-                       ? (double)ts * s_movie.video_time_base
-                       : s_movie.next_synth_pts;
-            s_movie.next_synth_pts = pts + (s_movie.fps > 0.0 ? 1.0 / s_movie.fps : 0.0);
-            movie_queue_video(s_movie.frame, pts);
-            av_frame_unref(s_movie.frame);
-        }
+// Take the frames the video decoder has ready into the queue, while there is
+// room. What does not fit stays in the decoder for the next pump. A frame with
+// no timestamp, as a B-frame stored in an AVI can come out, follows the last.
+static void movie_receive_video() {
+    while (s_movie.queue_count < MCI_VIDEO_QUEUE_FRAMES &&
+           avcodec_receive_frame(s_movie.video_codec_ctx, s_movie.frame) == 0) {
+        int64_t ts = s_movie.frame->best_effort_timestamp;
+        double pts =
+            ts != AV_NOPTS_VALUE ? (double)ts * s_movie.video_time_base : s_movie.next_synth_pts;
+        s_movie.next_synth_pts = pts + 1.0 / s_movie.fps;
+        movie_queue_video(s_movie.frame, pts);
     }
-    if (s_movie.audio_codec_ctx &&
-        avcodec_send_packet(s_movie.audio_codec_ctx, nullptr) >= 0) {
-        while (avcodec_receive_frame(s_movie.audio_codec_ctx, s_movie.frame) == 0) {
-            movie_queue_audio(s_movie.frame);
-            av_frame_unref(s_movie.frame);
-        }
+}
+
+static void movie_receive_audio() {
+    while (avcodec_receive_frame(s_movie.audio_codec_ctx, s_movie.frame) == 0) {
+        movie_queue_audio(s_movie.frame);
+        av_frame_unref(s_movie.frame);
     }
 }
 
 // Read and decode one packet. Returns 1 if the demuxer produced something, 0 at
 // end of stream.
+//
+// A video packet is only sent once movie_receive_video() has emptied the
+// decoder, so it is never refused for output still pending. A packet the
+// decoder rejects as damaged is lost, as it would be anyway.
 static int movie_decode_packet() {
-    AVPacket *pkt = av_packet_alloc();
-    if (!pkt) return 0;
-
-    int alive = 0;
+    AVPacket *pkt = s_movie.packet;
     int rc = av_read_frame(s_movie.fmt_ctx, pkt);
-    if (rc >= 0) {
-        alive = 1;
-        s_movie.dbg_packets++;
-        if (pkt->stream_index == s_movie.video_stream_idx) {
-            if (avcodec_send_packet(s_movie.video_codec_ctx, pkt) >= 0) {
-                while (s_movie.queue_count < MCI_VIDEO_QUEUE_FRAMES &&
-                       avcodec_receive_frame(s_movie.video_codec_ctx, s_movie.frame) == 0) {
-                    int64_t ts = s_movie.frame->best_effort_timestamp;
-                    double pts;
-                    if (ts != AV_NOPTS_VALUE && s_movie.video_time_base > 0.0) {
-                        pts = (double)ts * s_movie.video_time_base;
-                    } else {
-                        pts = s_movie.next_synth_pts;
-                    }
-                    s_movie.next_synth_pts = pts + (s_movie.fps > 0.0 ? 1.0 / s_movie.fps : 0.0);
-                    movie_queue_video(s_movie.frame, pts);
-                    av_frame_unref(s_movie.frame);
-                }
-            }
-        } else if (s_movie.audio_codec_ctx &&
-                   pkt->stream_index == s_movie.audio_stream_idx) {
-            if (avcodec_send_packet(s_movie.audio_codec_ctx, pkt) >= 0) {
-                while (avcodec_receive_frame(s_movie.audio_codec_ctx, s_movie.frame) == 0) {
-                    movie_queue_audio(s_movie.frame);
-                    av_frame_unref(s_movie.frame);
-                }
-            }
-        }
-    }
-
-    else {
+    if (rc < 0) {
         s_movie.dbg_read_err = rc;
+        return 0;
     }
-
+    s_movie.dbg_packets++;
+    if (pkt->stream_index == s_movie.video_stream_idx) {
+        avcodec_send_packet(s_movie.video_codec_ctx, pkt);
+    } else if (pkt->stream_index == s_movie.audio_stream_idx) {
+        avcodec_send_packet(s_movie.audio_codec_ctx, pkt);
+        movie_receive_audio();
+    }
     av_packet_unref(pkt);
-    av_packet_free(&pkt);
-    return alive;
+    return 1;
+}
+
+// Once the demuxer runs out, the decoders give up what they are still holding.
+// Without this a codec with an internal delay would swallow its last frames and
+// the movie would cut short of its final image. The video comes out through
+// movie_receive_video() over as many pumps as the queue needs.
+static void movie_flush_decoders() {
+    avcodec_send_packet(s_movie.video_codec_ctx, nullptr);
+    if (s_movie.audio_codec_ctx) {
+        avcodec_send_packet(s_movie.audio_codec_ctx, nullptr);
+        movie_receive_audio();
+    }
 }
 
 // Draw one decoded frame. The GL presenter owns the window in the default
@@ -563,21 +524,18 @@ static int movie_decode_packet() {
 // which reproduces the original's "double it if the client area is bigger than
 // 400x300" rule for a 320x240 movie.
 static void movie_present(AVFrame *src) {
-    sws_scale(s_movie.sws_ctx,
-              src->data, src->linesize,
-              0, s_movie.height,
-              s_movie.frame_rgb->data, s_movie.frame_rgb->linesize);
+    sws_scale(s_movie.sws_ctx, src->data, src->linesize, 0, s_movie.height, s_movie.frame_rgb->data,
+              s_movie.frame_rgb->linesize);
 
     if (nocturne_gl_is_active()) {
-        nocturne_gl_present_framebuffer(s_movie.frame_rgb->data[0],
-                                        s_movie.width, s_movie.height,
+        nocturne_gl_present_framebuffer(s_movie.frame_rgb->data[0], s_movie.width, s_movie.height,
                                         s_movie.frame_rgb->linesize[0], 24);
         return;
     }
 
-    if (s_movie.texture && s_movie.renderer) {
-        SDL_UpdateTexture(s_movie.texture, nullptr,
-                          s_movie.frame_rgb->data[0],
+    // Made only for a renderer.
+    if (s_movie.texture) {
+        SDL_UpdateTexture(s_movie.texture, nullptr, s_movie.frame_rgb->data[0],
                           s_movie.frame_rgb->linesize[0]);
         SDL_RenderClear(s_movie.renderer);
         SDL_RenderCopy(s_movie.renderer, s_movie.texture, nullptr, nullptr);
@@ -590,54 +548,46 @@ static void movie_present(AVFrame *src) {
 // =============================================================================
 
 // Extract the quoted filename from: open "path\to\file.avi" alias mov ...
-static int parse_open_command(const char* cmd, char* filepath, int maxlen) {
-    const char* q1 = strchr(cmd, '"');
-    if (!q1) return -1;
+static bool parse_open_command(const char *cmd, std::string *filepath) {
+    const char *q1 = strchr(cmd, '"');
+    if (!q1)
+        return false;
     q1++;
-    const char* q2 = strchr(q1, '"');
-    if (!q2) return -1;
-    int len = (int)(q2 - q1);
-    if (len >= maxlen) len = maxlen - 1;
-    memcpy(filepath, q1, len);
-    filepath[len] = '\0';
+    const char *q2 = strchr(q1, '"');
+    if (!q2)
+        return false;
 
     // Resolve the Watcom path the same way the CRT _fopen shim does — '\' to
     // '/' plus case-insensitive component matching — so "video\opening.avi"
     // finds video/OPENING.AVI the way the game's own existence check did.
-    std::string resolved = watcom_resolve_fs_path(filepath);
-    if (!resolved.empty() && (int)resolved.size() < maxlen) {
-        memcpy(filepath, resolved.c_str(), resolved.size() + 1);
-    }
-    return 0;
+    *filepath = watcom_resolve_fs_path(std::string(q1, q2).c_str());
+    return true;
 }
 
-// Get the SDL_Renderer from the DDraw shim's window (if available)
-static SDL_Renderer* get_sdl_renderer() {
-    // Try to get the renderer from any existing SDL window
-    SDL_Window* win = SDL_GetGrabbedWindow();
-    if (!win) {
-        // Fall back to window ID 1 (usually the first created window)
+// The game's window: the grabbed one, or the first made. None before SDL's
+// video is up, which SDL does not check for itself before looking.
+static SDL_Window *get_sdl_window() {
+    if (!SDL_WasInit(SDL_INIT_VIDEO))
+        return nullptr;
+    SDL_Window *win = SDL_GetGrabbedWindow();
+    if (!win)
         win = SDL_GetWindowFromID(1);
-    }
-    if (win) {
-        return SDL_GetRenderer(win);
-    }
-    return nullptr;
+    return win;
 }
 
-static SDL_Window* get_sdl_window() {
-    SDL_Window* win = SDL_GetGrabbedWindow();
-    if (!win) win = SDL_GetWindowFromID(1);
-    return win;
+// The DDraw shim's renderer, if it made one; SDL answers null for no window.
+static SDL_Renderer *get_sdl_renderer() {
+    return SDL_GetRenderer(get_sdl_window());
 }
 
 // =============================================================================
 // Public MCI Shim Functions
 // =============================================================================
 
-MCIERROR shim_mciSendStringA(LPCSTR lpstrCommand, LPSTR lpstrReturnString,
-                              UINT uReturnLength, HWND hwndCallback) {
-    if (!lpstrCommand) return 1;
+MCIERROR shim_mciSendStringA(LPCSTR lpstrCommand, LPSTR lpstrReturnString, UINT uReturnLength,
+                             HWND hwndCallback) {
+    if (!lpstrCommand)
+        return 1;
 
     // Clear return string
     if (lpstrReturnString && uReturnLength > 0) {
@@ -646,15 +596,15 @@ MCIERROR shim_mciSendStringA(LPCSTR lpstrCommand, LPSTR lpstrReturnString,
 
     // ---- open "file.avi" alias mov ... ----
     if (strncmp(lpstrCommand, "open ", 5) == 0) {
-        char filepath[512];
-        if (parse_open_command(lpstrCommand, filepath, sizeof(filepath)) < 0) {
+        std::string filepath;
+        if (!parse_open_command(lpstrCommand, &filepath)) {
             return 1; // MCIERR_FILENAME_REQUIRED
         }
 
-        int open_rc = movie_open(filepath);
+        int open_rc = movie_open(filepath.c_str());
         DLOG("frontend", "mci open '%s' -> %d (%dx%d fps=%.2f dur=%.1fs audio=%d)",
-                filepath, open_rc, s_movie.width, s_movie.height,
-                s_movie.fps, s_movie.duration_sec, s_movie.audio_stream_idx);
+             filepath.c_str(), open_rc, s_movie.width, s_movie.height, s_movie.fps,
+             s_movie.duration_sec, s_movie.audio_stream_idx);
         if (open_rc < 0) {
             return 1; // MCIERR_DEVICE_NOT_READY
         }
@@ -664,10 +614,9 @@ MCIERROR shim_mciSendStringA(LPCSTR lpstrCommand, LPSTR lpstrReturnString,
         // to it accordingly.
         s_movie.renderer = get_sdl_renderer();
         if (s_movie.renderer) {
-            s_movie.texture = SDL_CreateTexture(
-                s_movie.renderer, SDL_PIXELFORMAT_RGB24,
-                SDL_TEXTUREACCESS_STREAMING,
-                s_movie.width, s_movie.height);
+            s_movie.texture =
+                SDL_CreateTexture(s_movie.renderer, SDL_PIXELFORMAT_RGB24,
+                                  SDL_TEXTUREACCESS_STREAMING, s_movie.width, s_movie.height);
         }
 
         return 0; // success
@@ -681,7 +630,7 @@ MCIERROR shim_mciSendStringA(LPCSTR lpstrCommand, LPSTR lpstrReturnString,
             // result to MoveWindow to place the movie's child window, and the
             // user32 shim ignores MoveWindow for anything that isn't the real
             // top-level window — see shim_MoveWindow.
-            SDL_Window* win = get_sdl_window();
+            SDL_Window *win = get_sdl_window();
             int id = win ? (int)SDL_GetWindowID(win) : 1;
             snprintf(lpstrReturnString, uReturnLength, "%d", id);
         }
@@ -692,18 +641,25 @@ MCIERROR shim_mciSendStringA(LPCSTR lpstrCommand, LPSTR lpstrReturnString,
     if (strncmp(lpstrCommand, "where mov source", 16) == 0) {
         if (lpstrReturnString && uReturnLength > 0 && s_movie.is_open) {
             // MCI returns "x y w h" format
-            snprintf(lpstrReturnString, uReturnLength, "0 0 %d %d",
-                     s_movie.width, s_movie.height);
+            snprintf(lpstrReturnString, uReturnLength, "0 0 %d %d", s_movie.width, s_movie.height);
         }
         return 0;
     }
 
     // ---- play mov [window|fullscreen] [notify] ----
     if (strncmp(lpstrCommand, "play mov", 8) == 0) {
-        if (!s_movie.is_open) return 1;
+        if (!s_movie.is_open)
+            return 1;
+        // A paused movie resumes where it stopped: the clock moves on by the
+        // time it was paused for, or the frames already decoded ahead would
+        // wait that long to come due. One already playing carries on.
+        if (!s_movie.is_playing) {
+            s_movie.play_start_ticks = SDL_GetTicks();
+        } else if (s_movie.is_paused) {
+            s_movie.play_start_ticks += SDL_GetTicks() - s_movie.pause_ticks;
+        }
         s_movie.is_playing = 1;
         s_movie.is_paused = 0;
-        s_movie.play_start_ticks = SDL_GetTicks();
 
         // Recorded but not acted on. The original asked MCI for a fullscreen
         // device when g_FullscreenMovie was set; toggling the SDL window's
@@ -741,7 +697,8 @@ MCIERROR shim_mciSendStringA(LPCSTR lpstrCommand, LPSTR lpstrReturnString,
 }
 
 BOOL shim_mciGetErrorStringA(MCIERROR mcierr, LPSTR pszText, UINT cchText) {
-    if (!pszText || cchText == 0) return 0;
+    if (!pszText || cchText == 0)
+        return 0;
     switch (mcierr) {
     case 0:
         strncpy(pszText, "No error", cchText);
@@ -781,39 +738,39 @@ extern "C" int mci_video_pump_frame() {
     // back — it is silently dropped. A pump that keeps reading for audio's sake
     // therefore shreds the video stream, and at ~50 pumps/sec x 256 packets it
     // consumes an entire 88-second movie in under a second and reports EOF.
-    while (!s_movie.at_eof && packets < MCI_MAX_PACKETS_PER_PUMP) {
-        if (s_movie.queue_count >= MCI_VIDEO_QUEUE_FRAMES) break;
+    // Hence the video decoder is emptied into the queue before every read.
+    for (;;) {
+        movie_receive_video();
+        if (s_movie.queue_count >= MCI_VIDEO_QUEUE_FRAMES || s_movie.at_eof ||
+            packets >= MCI_MAX_PACKETS_PER_PUMP) {
+            break;
+        }
         if (!movie_decode_packet()) {
             s_movie.at_eof = 1;
             movie_flush_decoders();
-            break;
         }
         packets++;
     }
 
-    // Present at most one frame per tick. Anything already overdue behind it is
-    // dropped rather than drawn, so a stalled pump costs frames instead of
-    // stretching the movie out past its real length.
-    int presented = 0;
+    // Present at most one frame per tick: the last of those due. Any overdue
+    // ahead of it are dropped rather than drawn, so a stalled pump costs frames
+    // instead of stretching the movie out past its real length.
     while (s_movie.queue_count > 0 && s_movie.queue[s_movie.queue_head].pts <= now) {
         MciVideoFrame *f = &s_movie.queue[s_movie.queue_head];
-        int is_last_due = !(s_movie.queue_count > 1 &&
-                            s_movie.queue[(s_movie.queue_head + 1) % MCI_VIDEO_QUEUE_FRAMES].pts <= now);
-        if (is_last_due && !presented) {
-            movie_present(f->frame);
-            presented = 1;
-            s_movie.dbg_presented++;
-        } else {
+        const bool next_due =
+            s_movie.queue_count > 1 &&
+            s_movie.queue[(s_movie.queue_head + 1) % MCI_VIDEO_QUEUE_FRAMES].pts <= now;
+        if (next_due) {
             s_movie.dbg_dropped++;
+        } else {
+            movie_present(f->frame);
+            s_movie.dbg_presented++;
         }
         av_frame_unref(f->frame);
         s_movie.queue_head = (s_movie.queue_head + 1) % MCI_VIDEO_QUEUE_FRAMES;
         s_movie.queue_count--;
-        if (presented) break;
     }
 
-    // End of stream: demuxer drained, nothing left to show, and the audio
-    // device has actually played out what was queued.
     // End of stream: demuxer drained, nothing left to show, and the audio
     // device has played out what was queued.
     //
@@ -826,25 +783,21 @@ extern "C" int mci_video_pump_frame() {
         if (s_movie.drained_ticks == 0) {
             s_movie.drained_ticks = SDL_GetTicks();
             DLOG("frontend",
-                    "mci drained after %ums: packets=%u presented=%u dropped=%u "
-                    "read_err=%d clock=%.2f audio_dev=%d queued=%u bps=%d",
-                    (unsigned)(s_movie.drained_ticks - s_movie.play_start_ticks),
-                    s_movie.dbg_packets, s_movie.dbg_presented, s_movie.dbg_dropped,
-                    s_movie.dbg_read_err, now, (int)(s_movie.audio_dev != 0),
-                    s_movie.audio_dev ? SDL_GetQueuedAudioSize(s_movie.audio_dev) : 0u,
-                    s_movie.audio_bytes_per_sec);
+                 "mci drained after %ums: packets=%u presented=%u dropped=%u "
+                 "read_err=%d clock=%.2f audio_dev=%d queued=%u bps=%d",
+                 (unsigned)(s_movie.drained_ticks - s_movie.play_start_ticks), s_movie.dbg_packets,
+                 s_movie.dbg_presented, s_movie.dbg_dropped, s_movie.dbg_read_err, now,
+                 (int)(s_movie.audio_dev != 0),
+                 s_movie.audio_dev ? SDL_GetQueuedAudioSize(s_movie.audio_dev) : 0u,
+                 s_movie.audio_bytes_per_sec);
         }
-        int audio_done = !s_movie.audio_dev ||
-                         SDL_GetQueuedAudioSize(s_movie.audio_dev) == 0;
-        int waited_long_enough =
-            (SDL_GetTicks() - s_movie.drained_ticks) > MCI_EOS_AUDIO_GRACE_MS;
+        int audio_done = !s_movie.audio_dev || SDL_GetQueuedAudioSize(s_movie.audio_dev) == 0;
+        int waited_long_enough = (SDL_GetTicks() - s_movie.drained_ticks) > MCI_EOS_AUDIO_GRACE_MS;
 
+        // Once: a movie no longer playing is not pumped.
         if (audio_done || waited_long_enough) {
             s_movie.is_playing = 0;
-            if (!s_movie.notified) {
-                s_movie.notified = 1;
-                return 1;   // caller posts MM_MCINOTIFY
-            }
+            return 1; // caller posts MM_MCINOTIFY
         }
     }
     return 0;

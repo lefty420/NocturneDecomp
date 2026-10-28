@@ -32,8 +32,8 @@ builds the `game` preset into `build/recreation/game` and runs the executable fr
 | Preset | Target | What it does |
 |---|---|---|
 | `check-linux-x86_64` | native 64-bit | per-file `-fsyntax-only`; no link, no shims, no SDL |
-| `exe-linux-x86_64` | native 64-bit | full executable |
-| `exe-linux-asan-x86_64` | native 64-bit | full executable + ASan/UBSan — **the default** |
+| `exe-linux-x86_64` | native 64-bit | full executable, the shims through clang-tidy |
+| `exe-linux-asan-x86_64` | native 64-bit | full executable + ASan/UBSan, the shims through clang-tidy — **the default** |
 | `check-windows-x86_64` | Windows 64-bit | syntax check against the Windows target, from Linux |
 | `exe-windows-x86_64` | Windows 64-bit | `nocturne.exe`, cross-compiled from Linux — **needs a cross toolchain** |
 | `check-windows-msys2` | Windows 64-bit | syntax check, run **on** Windows under MSYS2 |
@@ -87,6 +87,15 @@ sudo apt install libx11-dev libxext-dev libxcursor-dev libxi-dev libxfixes-dev \
     libegl-dev libdecor-0-dev libpulse-dev libasound2-dev
 ```
 
+**clang-tidy (the x86_64 Linux presets above, and the coverage one):** each shim is checked
+as it compiles, with `shims/.clang-tidy`, and a finding fails the build. The decompiled
+modules are other targets and are not checked. Configure stops if `clang-tidy` is missing;
+`-DNOCTURNE_SHIMS_TIDY=OFF` builds without it.
+
+```sh
+sudo apt install clang-tidy
+```
+
 That is the whole list for the Linux presets — no multilib, no `:i386` packages, and SDL2,
 SDL2_ttf and FFmpeg are built from source rather than taken from the system.
 
@@ -96,11 +105,15 @@ The Windows lane is **opt-in and needs nothing from a normal clone.** No other p
 a cross compiler, so if you are not building for Windows you can skip this section entirely.
 
 ```sh
-sudo apt install g++-mingw-w64-x86-64
+sudo apt install g++-mingw-w64-x86-64 lld
 ```
 
 It is the `g++` package and not `mingw-w64-x86-64-dev` because the shims are C++17 — the header
 -only package has no target `libstdc++` for `std::thread` and `std::filesystem` to come from.
+The lane links with `lld` rather than the mingw binutils `ld`, which writes a base relocation for
+every thread-local access: on Windows, where the exe never loads at its preferred base, the first
+one faults. [`cmake/toolchains/windows-x86_64.cmake`](../cmake/toolchains/windows-x86_64.cmake)
+has the details.
 These are architecture-independent packages with no `:i386` component, so unlike the multilib
 warning below they do not disturb an amd64 desktop.
 
@@ -228,7 +241,8 @@ ad hoc. `run.sh` and `debug.sh` beside it launch the binary inside.
 An app launched from Finder starts in `/`, so the data directory defaults to
 `~/Library/Application Support/NocturneDecomp/` (`NOCTURNE_DATA_DIR_FROM_SDL` in
 `shims/core/path_roots.h`). If that folder holds no `.pod`, the app says so, opens it, and
-exits. To run against a game folder elsewhere, pass `--data-dir`:
+exits. To use a game folder elsewhere, put its path on the first line of a `data_dir.txt` in
+that folder; saves and settings stay there. Or pass `--data-dir`:
 
 ```sh
 build/exe-macos-arm64/run.sh --data-dir ~/Games/Nocturne
@@ -257,7 +271,7 @@ generated headers and the build carry a portable spelling:
 | Watcom's signed `char` | `-fsigned-char`, since arm64 Linux's `char` is unsigned |
 | Separate multiply and add roundings | `-ffp-contract=off`, since arm64 fuses them by default |
 
-The last two are in `NOCTURNE_CODEGEN_FLAGS` in `CMakeLists.txt`. Netplay is lockstep, so
+The last two are in `NOCTURNE_CODEGEN_FLAGS` in `cmake/compile_flags.cmake`. Netplay is lockstep, so
 both players have to compute the same floats. The `float10` split means a build of one kind
 (Linux, mingw Windows and macOS on x86_64) against a build of the other (MSVC, any Arm) can
 drift where extended-precision maths feeds the simulation. So can two builds with different
@@ -360,7 +374,7 @@ cacheable:
 
   CI sets the same through the Workflows library's `cpp-build`.
 - **A reproducible precompiled header.** Clang stamps a `.pch` with the time it was built, so a
-  rebuilt one never matches the last. With ccache on, `CMakeLists.txt` passes
+  rebuilt one never matches the last. With ccache on, `cmake/options.cmake` passes
   `-fno-pch-timestamp` to clang to leave the stamp out.
 
 `time_macros` lets a cached object keep an old `__DATE__`/`__TIME__`. The only file using them,

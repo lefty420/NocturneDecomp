@@ -26,21 +26,27 @@ extern "C" {
 #endif
 
 enum {
-    NOCTURNE_WINDOW_MODE_WINDOWED   = 0,
-    NOCTURNE_WINDOW_MODE_FULLSCREEN = 1,  // real mode-setting fullscreen
-    NOCTURNE_WINDOW_MODE_BORDERLESS = 2,  // desktop-sized, no decorations
-    NOCTURNE_WINDOW_MODE_COUNT      = 3
+    NOCTURNE_WINDOW_MODE_WINDOWED = 0,
+    NOCTURNE_WINDOW_MODE_FULLSCREEN = 1, // real mode-setting fullscreen
+    NOCTURNE_WINDOW_MODE_BORDERLESS = 2, // desktop-sized, no decorations
+    NOCTURNE_WINDOW_MODE_COUNT = 3
 };
+
+// 1 where the window is the whole screen and nothing may size it: a console, a
+// packaged app. A platform file sets NOCTURNE_PLATFORM_FIXED_DISPLAY=1 for it.
+// The window is then made full-screen and never resized or moved, the mode is
+// always borderless and never cycles or applies, and the Graphics Options
+// screen leaves its Window line out. The render resolution still changes; the
+// presenter scales it to the screen.
+extern int g_nocturne_fixed_display;
 
 // Current mode, loaded from the INI on first call. Defaults to windowed.
 int nocturne_window_mode_get(void);
 
-// Set and persist the mode. Applies immediately if a window exists.
-void nocturne_window_mode_set(int mode);
-
-// Advance the mode by `step`, wrapping. Returns the new mode. The Options
-// screen passes -1 for a left press and +1 for right, which is how the
-// engine's own three-state lines read g_MenuLeftRightPressed.
+// Advance the mode by `step`, wrapping, persist it, and apply it if a window
+// exists. Returns the new mode. The Options screen passes -1 for a left press
+// and +1 for right, which is how the engine's own three-state lines read
+// g_MenuLeftRightPressed.
 int nocturne_window_mode_cycle(int step);
 
 // Display name for a mode ("Windowed" / "Fullscreen" / "Borderless").
