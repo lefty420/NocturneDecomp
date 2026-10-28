@@ -152,7 +152,7 @@ jobs:
           New-Item -ItemType Directory -Force out\uwp-link | Out-Null
           Copy-Item *.log, *.txt out\uwp-link -ErrorAction SilentlyContinue
           Get-ChildItem build -Filter 'nocturne.*' -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe','.pdb' } | ForEach-Object { Copy-Item $_.FullName out\uwp-link; "output: $($_.Name) $($_.Length)" }
-      - name: Package (.msix, test-signed)
+      - name: Package (.appx, test-signed)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
@@ -196,14 +196,12 @@ jobs:
           $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Directory | Where-Object Name -match '^10\.' | Sort-Object Name | Select-Object -Last 1
           $bin = Join-Path $sdk.FullName 'x64'
           New-Item -ItemType Directory -Force out\package | Out-Null
-          & "$bin\makeappx.exe" pack /o /d $P /p out\package\NocturneDecomp.msix 2>&1 | Out-File $log -Append
           & "$bin\makeappx.exe" pack /o /d $P /p out\package\NocturneDecomp.appx 2>&1 | Out-File $log -Append
           $cert = New-SelfSignedCertificate -Type Custom -Subject $subject -KeyUsage DigitalSignature -FriendlyName 'NocturneDev test' `
             -CertStoreLocation Cert:\CurrentUser\My -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
           $pw = ConvertTo-SecureString 'nocturne' -AsPlainText -Force
           Export-PfxCertificate -Cert $cert -FilePath cert.pfx -Password $pw | Out-Null
           Export-Certificate -Cert $cert -FilePath out\package\NocturneDev.cer | Out-Null
-          & "$bin\signtool.exe" sign /fd SHA256 /f cert.pfx /p nocturne out\package\NocturneDecomp.msix 2>&1 | Out-File $log -Append
           & "$bin\signtool.exe" sign /fd SHA256 /f cert.pfx /p nocturne out\package\NocturneDecomp.appx 2>&1 | Out-File $log -Append
           Get-ChildItem out\package | ForEach-Object { "package: $($_.Name) $($_.Length)" } | Out-File $log -Append
           Get-ChildItem $P -Recurse -File | ForEach-Object { "in package: $($_.FullName.Replace((Resolve-Path $P).Path,'')) $($_.Length)" } | Out-File $log -Append

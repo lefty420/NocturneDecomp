@@ -80,7 +80,7 @@ log covers only the Xbox port and its launcher.
 
 ## Packaging and installing
 
-- Sideloadable `.appx` and `.msix`, built by GitHub Actions on a Windows runner and signed with a fresh
+- A sideloadable `.appx` (the `.msix` is no longer produced), built by GitHub Actions on a Windows runner and signed with a fresh
   self-signed certificate each run (`NocturneDev.cer` ships beside the package).
 - **Version `0.2.<run number>.0`**, so a newer build installs over an older one as an update and keeps the
   game files and settings (uninstalling deletes them).
