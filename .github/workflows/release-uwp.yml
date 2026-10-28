@@ -1,0 +1,50 @@
+# Publishes a pre-release of the Xbox app: attaches the package from the uwp-link build of the same commit.
+#
+# Use: push a tag such as v0.2.0-alpha.1 on a commit that has a green uwp-link run (the head of the port
+# branch, once its build finished), or start this workflow by hand with the tag name. Nothing is rebuilt here:
+# the package already signed by that build is the one released. Only the package files (.appx, the .cer
+# certificate) are attached; the signing key never leaves the build.
+name: release-uwp
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish, e.g. v0.2.0-alpha.1 (created on the branch head if it does not exist)'
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find the build of this commit
+        run: |
+          sha=$(git rev-parse HEAD)
+          run=$(gh run list --workflow uwp-link.yml --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          if [ -z "$run" ]; then
+            echo "::error::No successful uwp-link run for commit $sha. Wait for the build of that commit to finish, then publish again."
+            exit 1
+          fi
+          echo "using uwp-link run $run"
+          gh run download "$run" --name nocturne-uwp-package --dir dist
+          ls -l dist
+          test -n "$(ls dist/*.appx 2>/dev/null)" || { echo "::error::the build has no .appx"; exit 1; }
+      - name: Publish the pre-release
+        run: |
+          flags="--prerelease"
+          gh release create "$TAG" dist/* \
+            --target "$GITHUB_SHA" \
+            --title "Nocturne for Xbox Series X|S $TAG" \
+            --notes-file docs/release-notes-alpha.md \
+            $flags
