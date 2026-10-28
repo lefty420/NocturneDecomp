@@ -24,6 +24,9 @@
 #include "core/launcher_settings.h"
 #include "gl/gl_pixels.h"
 #include <stdio.h>
+#include "gl/upscale_shaders.h"
+#include "gl/upscaler.h"
+
 #include <cmath>
 #include <stdlib.h>
 #include <string.h>
@@ -619,39 +622,40 @@ void present_to_window(GLuint texture, int fallback_w, int fallback_h, bool flip
     // Nearest keeps whole-multiple scaling crisp; at a fractional scale it makes
     // pixel sizes visibly uneven (some source pixels land on 1 screen pixel,
     // their neighbours on 2), so blend instead.
+    // Screen shape (launcher Graphics tab): smart stretch draws the picture as a bent strip, for the plain
+    // quad and the upscalers alike.
     const bool warp = nocturne_launcher_settings()->screen_shape == 1 &&
                       shape_fills(drawable_w, drawable_h, logical_w, logical_h);
-    set_sampling(texture, (!warp && viewport_is_integer_scale(vp_w, logical_w)) ? GL_NEAREST : GL_LINEAR);
+    const GLint standard_filter =
+        (!warp && viewport_is_integer_scale(vp_w, logical_w)) ? GL_NEAREST : GL_LINEAR;
+    nocturne_gl_blit_set_warp(warp);
 
-    // Launcher option (Graphics tab): FSR-style upscaling. Only worth drawing when the picture is
-    // actually being resized; at 1:1 it would only sharpen.
-    static int fsr_state = -1;   // -1 unknown, 0 off, 1 on, 2 asked for but the shader would not build
-    const NocturneLauncherSettings *ls = nocturne_launcher_settings();
-    const bool want_fsr = ls->upscaler != 0 && fallback_w > 1 && fallback_h > 1 &&
-                          (vp_w != fallback_w || vp_h != fallback_h);
+    // An upscaler only enlarges: the texture is `fallback_w` x `fallback_h`, and
+    // a picture shown at that size or smaller takes the standard filter. Each
+    // reads the texture filtered as it asks; one that cannot be had puts the
+    // standard filter back.
+    int drawn = 0;
+    const int upscaler = nocturne_upscaler_get();
+    if (upscaler != NOCTURNE_UPSCALER_STANDARD && (vp_w > fallback_w || vp_h > fallback_h)) {
+        set_sampling(texture, nocturne_upscale_wants_nearest(upscaler) ? GL_NEAREST : GL_LINEAR);
+        drawn = nocturne_gl_blit_quad_upscaled(
+            upscaler, texture, flipped ? 1 : 0, fallback_w, fallback_h,
+            (float)nocturne_upscaler_sharpness_get() / (float)NOCTURNE_UPSCALER_SHARPNESS_MAX);
+        static int logged_mode = -1;
+        if (drawn && logged_mode != upscaler) {
+            logged_mode = upscaler;
+            fprintf(stderr, "nocturne: upscaler %s on, %dx%d -> %dx%d, sharpness %d%%\n",
+                    nocturne_upscaler_name(upscaler), fallback_w, fallback_h, vp_w, vp_h,
+                    nocturne_upscaler_sharpness_get());
+        }
+    }
 
     // Every frame reaches the screen through this one quad — software mode
     // included, since nothing else draws there. A failure here is a black window
     // and it says so, rather than being carried by a second path that would hide
     // a program that stopped building.
-    nocturne_gl_blit_set_warp(warp);
-    int drawn = 0;
-    if (want_fsr && fsr_state != 2) {
-        set_sampling(texture, GL_LINEAR);
-        drawn = nocturne_gl_blit_quad_fsr(texture, flipped ? 1 : 0, fallback_w, fallback_h, ls->fsr_sharpness);
-        if (!drawn) {
-            fsr_state = 2;
-            fprintf(stderr, "nocturne: FSR shader unavailable, using plain scaling\n");
-        } else if (fsr_state != 1) {
-            fsr_state = 1;
-            fprintf(stderr, "nocturne: FSR on, %dx%d -> %dx%d, sharpness %.2f\n", fallback_w, fallback_h, vp_w, vp_h,
-                    ls->fsr_sharpness);
-        }
-        if (!drawn) {
-            set_sampling(texture, (!warp && viewport_is_integer_scale(vp_w, logical_w)) ? GL_NEAREST : GL_LINEAR);
-        }
-    }
     if (!drawn) {
+        set_sampling(texture, standard_filter);
         drawn = flipped ? nocturne_gl_blit_quad_flipped(texture) : nocturne_gl_blit_quad(texture);
     }
     nocturne_gl_blit_set_warp(0);

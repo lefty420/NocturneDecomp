@@ -12,6 +12,8 @@
 #include "gl/gl_api.h"
 #include "gl/gl_blit.h"
 #include "gl/gl_program.h"
+#include "gl/upscale_shaders.h"
+#include "gl/upscaler.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -75,13 +77,14 @@ const int kQuadBottomUp = 4;
 //     u(x) = mix(x, (4x - x^3) / 3, t)
 // which reaches the picture's edge exactly at the screen's edge (u = x at t = 0, the plain quad). With
 // t = 0.7 the middle is drawn about 8% wider than true and the outermost edge about 2.3 times wider.
-// Linear interpolation across 48 columns follows the curve closely. Built once, appended to the same buffer after the plain quads.
-const int   kWarpColumns = 48;
+// Linear interpolation across 48 columns follows the curve closely. Built once, appended to the same buffer
+// after the plain quads, and drawn by whichever program draws the picture (plain or an upscaler).
+const int kWarpColumns = 48;
 const float kWarpStrength = 0.7f;
-const int   kWarpVerts = 2 * (kWarpColumns + 1);
-const int   kWarpTopDown  = 8;
-const int   kWarpBottomUp = 8 + kWarpVerts;
-bool        g_warp = false;
+const int kWarpVerts = 2 * (kWarpColumns + 1);
+const int kWarpTopDown = 8;
+const int kWarpBottomUp = 8 + kWarpVerts;
+bool g_warp = false;
 
 // One draw of the picture: the plain quad, or the warped strip when smart stretch is on.
 void draw_picture(int first) {
@@ -99,168 +102,22 @@ void build_warp(GLfloat *out, bool flipped) {
         const float u = 0.5f * ((1.0f - kWarpStrength) * x + kWarpStrength * w) + 0.5f;
         const float vt = flipped ? 1.0f : 0.0f, vb = flipped ? 0.0f : 1.0f;
         GLfloat *p = out + i * 8;
-        p[0] = x; p[1] =  1.0f; p[2] = u; p[3] = vt;
+        p[0] = x; p[1] = 1.0f; p[2] = u; p[3] = vt;
         p[4] = x; p[5] = -1.0f; p[6] = u; p[7] = vb;
     }
 }
 
+// One upscaler's program, built from gl/upscale_shaders.h on its first use
+// over the plain quad's vertex shader, so it reads the same vertex array.
+struct UpscaleProgram {
+    bool tried; // as g_tried, for this filter
+    GLuint program;
+    GLint loc_tex;
+    GLint loc_src;
+    GLint loc_sharp; // -1 where the filter does not read it, which GL ignores
+};
 
-// -----------------------------------------------------------------------------
-// FSR-style upscale (an addition for the Xbox port; the shipped game has none)
-// -----------------------------------------------------------------------------
-//
-// Two stages in one fragment shader, after AMD's FidelityFX Super Resolution 1
-// (MIT licence): EASU, an edge-adaptive upscale that looks along the local edge
-// direction and weights twelve source texels with a windowed-lanczos-like kernel;
-// then RCAS, a contrast-adaptive sharpen. The reference runs RCAS as a second pass
-// over EASU's output. Here it is folded in: the four neighbours RCAS needs are taken
-// as plain bilinear samples one output pixel away, which costs 4 taps instead of
-// four more EASU evaluations and a render target, and keeps this a single draw into
-// the window with no extra GL state to restore.
-//
-// Texels are read with texelFetch so the texture's own filter does not matter for
-// EASU; the RCAS neighbours use the texture's linear filter, which the caller sets.
-const char *kFsrFragmentSource =
-    NOCTURNE_GLSL_VERSION
-    "uniform sampler2D u_tex;\n"
-    "uniform vec2  u_src;\n"      // source size in texels
-    "uniform float u_sharp;\n"    // RCAS strength, 0.25 (soft) .. 1.0 (strongest)
-    "in  vec2 v_uv;\n"
-    "out vec4 o_color;\n"
-    "vec3 fetch(ivec2 p) {\n"
-    "    return texelFetch(u_tex, clamp(p, ivec2(0), ivec2(u_src) - ivec2(1)), 0).rgb;\n"
-    "}\n"
-    "float luma(vec3 c) { return c.b * 0.5 + (c.r * 0.5 + c.g); }\n"
-    "void easuSet(inout vec2 dir, inout float len, float w, float lA, float lB, float lC, float lD, float lE) {\n"
-    "    float lenX = max(abs(lD - lC), abs(lC - lB));\n"
-    "    float dirX = lD - lB;\n"
-    "    dir.x += dirX * w;\n"
-    "    lenX = clamp(abs(dirX) / max(lenX, 1e-6), 0.0, 1.0);\n"
-    "    lenX *= lenX;\n"
-    "    len += lenX * w;\n"
-    "    float lenY = max(abs(lE - lC), abs(lC - lA));\n"
-    "    float dirY = lE - lA;\n"
-    "    dir.y += dirY * w;\n"
-    "    lenY = clamp(abs(dirY) / max(lenY, 1e-6), 0.0, 1.0);\n"
-    "    lenY *= lenY;\n"
-    "    len += lenY * w;\n"
-    "}\n"
-    "void easuTap(inout vec3 aC, inout float aW, vec2 off, vec2 dir, vec2 len, float lob, float clp, vec3 c) {\n"
-    "    vec2 v;\n"
-    "    v.x = off.x * dir.x + off.y * dir.y;\n"
-    "    v.y = off.x * -dir.y + off.y * dir.x;\n"
-    "    v *= len;\n"
-    "    float d2 = min(v.x * v.x + v.y * v.y, clp);\n"
-    "    float wB = 0.4 * d2 - 1.0;\n"
-    "    float wA = lob * d2 - 1.0;\n"
-    "    wB *= wB;\n"
-    "    wA *= wA;\n"
-    "    wB = 1.5625 * wB - 0.5625;\n"
-    "    float w = wB * wA;\n"
-    "    aC += c * w;\n"
-    "    aW += w;\n"
-    "}\n"
-    "vec3 easu(vec2 uv) {\n"
-    "    vec2 pp = uv * u_src - 0.5;\n"
-    "    vec2 fpf = floor(pp);\n"
-    "    ivec2 fp = ivec2(fpf);\n"
-    "    pp -= fpf;\n"
-    // Source layout around the nearest texel f:      b c
-    //                                              e f g h
-    //                                              i j k l
-    //                                                n o
-    "    vec3 b = fetch(fp + ivec2( 0,-1)), c = fetch(fp + ivec2( 1,-1));\n"
-    "    vec3 e = fetch(fp + ivec2(-1, 0)), f = fetch(fp);\n"
-    "    vec3 g = fetch(fp + ivec2( 1, 0)), h = fetch(fp + ivec2( 2, 0));\n"
-    "    vec3 i = fetch(fp + ivec2(-1, 1)), j = fetch(fp + ivec2( 0, 1));\n"
-    "    vec3 k = fetch(fp + ivec2( 1, 1)), l = fetch(fp + ivec2( 2, 1));\n"
-    "    vec3 n = fetch(fp + ivec2( 0, 2)), o = fetch(fp + ivec2( 1, 2));\n"
-    "    float bL = luma(b), cL = luma(c), eL = luma(e), fL = luma(f), gL = luma(g), hL = luma(h);\n"
-    "    float iL = luma(i), jL = luma(j), kL = luma(k), lL = luma(l), nL = luma(n), oL = luma(o);\n"
-    "    vec2 dir = vec2(0.0);\n"
-    "    float len = 0.0;\n"
-    "    easuSet(dir, len, (1.0 - pp.x) * (1.0 - pp.y), bL, eL, fL, gL, jL);\n"
-    "    easuSet(dir, len,        pp.x  * (1.0 - pp.y), cL, fL, gL, hL, kL);\n"
-    "    easuSet(dir, len, (1.0 - pp.x) *        pp.y,  fL, iL, jL, kL, nL);\n"
-    "    easuSet(dir, len,        pp.x  *        pp.y,  gL, jL, kL, lL, oL);\n"
-    "    vec2 dir2 = dir * dir;\n"
-    "    float dirR = dir2.x + dir2.y;\n"
-    "    bool zro = dirR < (1.0 / 32768.0);\n"
-    "    dirR = inversesqrt(max(dirR, 1e-9));\n"
-    "    dirR = zro ? 1.0 : dirR;\n"
-    "    dir.x = zro ? 1.0 : dir.x;\n"
-    "    dir *= dirR;\n"
-    "    len *= 0.5;\n"
-    "    len *= len;\n"
-    "    float stretch = (dir.x * dir.x + dir.y * dir.y) / max(abs(dir.x), abs(dir.y));\n"
-    "    vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);\n"
-    "    float lob = 0.5 + ((0.25 - 0.04) - 0.5) * len;\n"
-    "    float clp = 1.0 / lob;\n"
-    "    vec3 min4 = min(min(f, g), min(j, k));\n"
-    "    vec3 max4 = max(max(f, g), max(j, k));\n"
-    "    vec3 aC = vec3(0.0);\n"
-    "    float aW = 0.0;\n"
-    "    easuTap(aC, aW, vec2( 0.0,-1.0) - pp, dir, len2, lob, clp, b);\n"
-    "    easuTap(aC, aW, vec2( 1.0,-1.0) - pp, dir, len2, lob, clp, c);\n"
-    "    easuTap(aC, aW, vec2(-1.0, 1.0) - pp, dir, len2, lob, clp, i);\n"
-    "    easuTap(aC, aW, vec2( 0.0, 1.0) - pp, dir, len2, lob, clp, j);\n"
-    "    easuTap(aC, aW, vec2( 0.0, 0.0) - pp, dir, len2, lob, clp, f);\n"
-    "    easuTap(aC, aW, vec2(-1.0, 0.0) - pp, dir, len2, lob, clp, e);\n"
-    "    easuTap(aC, aW, vec2( 1.0, 1.0) - pp, dir, len2, lob, clp, k);\n"
-    "    easuTap(aC, aW, vec2( 2.0, 1.0) - pp, dir, len2, lob, clp, l);\n"
-    "    easuTap(aC, aW, vec2( 2.0, 0.0) - pp, dir, len2, lob, clp, h);\n"
-    "    easuTap(aC, aW, vec2( 1.0, 0.0) - pp, dir, len2, lob, clp, g);\n"
-    "    easuTap(aC, aW, vec2( 1.0, 2.0) - pp, dir, len2, lob, clp, o);\n"
-    "    easuTap(aC, aW, vec2( 0.0, 2.0) - pp, dir, len2, lob, clp, n);\n"
-    "    return min(max4, max(min4, aC / aW));\n"
-    "}\n"
-    "void main() {\n"
-    "    vec3 e = easu(v_uv);\n"
-    "    vec2 px = vec2(abs(dFdx(v_uv.x)), abs(dFdy(v_uv.y)));\n"   // one output pixel, in uv
-    "    vec3 b = texture(u_tex, v_uv + vec2(0.0, -px.y)).rgb;\n"
-    "    vec3 d = texture(u_tex, v_uv + vec2(-px.x, 0.0)).rgb;\n"
-    "    vec3 f = texture(u_tex, v_uv + vec2( px.x, 0.0)).rgb;\n"
-    "    vec3 h = texture(u_tex, v_uv + vec2(0.0,  px.y)).rgb;\n"
-    "    vec3 mn4 = min(min(b, d), min(f, h));\n"
-    "    vec3 mx4 = max(max(b, d), max(f, h));\n"
-    "    vec3 hitMin = mn4 / (4.0 * max(mx4, vec3(1e-4)));\n"
-    "    vec3 hitMax = (vec3(1.0) - mx4) / min(4.0 * mn4 - vec3(4.0), vec3(-1e-4));\n"
-    "    vec3 lobeRGB = max(-hitMin, hitMax);\n"
-    "    float lobe = max(-0.1875, min(max(lobeRGB.r, max(lobeRGB.g, lobeRGB.b)), 0.0)) * u_sharp;\n"
-    "    vec3 outc = (lobe * (b + d + f + h) + e) / (4.0 * lobe + 1.0);\n"
-    "    o_color = vec4(clamp(outc, 0.0, 1.0), 1.0);\n"
-    "}\n";
-
-bool   g_fsr_tried   = false;
-GLuint g_fsr_program = 0;
-GLint  g_fsr_loc_tex = -1;
-GLint  g_fsr_loc_src = -1;
-GLint  g_fsr_loc_sharp = -1;
-
-bool build_fsr_program() {
-    if (gl.Uniform1f == nullptr || gl.Uniform2f == nullptr) {
-        DLOG("render","gl_blit: no Uniform1f/2f — FSR unavailable");
-        return false;
-    }
-    GLuint program = nocturne_gl_build_program(kVertexSource, kFsrFragmentSource, "gl_blit_fsr");
-    if (program == 0) {
-        return false;
-    }
-    // The vertex array recorded by the plain blit program reads a_uv from the location that
-    // program was given; this one has the same vertex shader, so it should match. If it ever
-    // does not, drawing with this program would sample garbage coordinates: refuse instead.
-    if (gl.GetAttribLocation(program, "a_uv") != g_attr_uv) {
-        DLOG("render","gl_blit: FSR program put a_uv elsewhere — refusing");
-        if (gl.DeleteProgram != nullptr) gl.DeleteProgram(program);
-        return false;
-    }
-    g_fsr_loc_tex   = gl.GetUniformLocation(program, "u_tex");
-    g_fsr_loc_src   = gl.GetUniformLocation(program, "u_src");
-    g_fsr_loc_sharp = gl.GetUniformLocation(program, "u_sharp");
-    g_fsr_program = program;
-    DLOG("render","gl_blit: FSR program linked (id=%u)", (unsigned)program);
-    return true;
-}
+UpscaleProgram g_upscale[NOCTURNE_UPSCALER_COUNT];
 
 bool have_entry_points() {
     return gl.CreateShader != nullptr && gl.ShaderSource != nullptr &&
@@ -311,8 +168,10 @@ bool build_program() {
 
     gl.BindVertexArray(g_vao);
     gl.BindBuffer(GL_ARRAY_BUFFER, g_vbo);
+    // The plain quads, then the two warped strips for smart stretch.
     GLfloat all[32 + 2 * kWarpVerts * 4];
-    for (int i = 0; i < 32; ++i) all[i] = kQuad[i];
+    for (int i = 0; i < 32; ++i)
+        all[i] = kQuad[i];
     build_warp(all + 32, false);
     build_warp(all + 32 + kWarpVerts * 4, true);
     gl.BufferData(GL_ARRAY_BUFFER, (GLsizeiptr)sizeof(all), all, GL_STATIC_DRAW);
@@ -333,34 +192,40 @@ bool build_program() {
     return true;
 }
 
-int blit_quad(unsigned int texture, int first) {
-    if (g_program == 0) {
-        if (g_tried)
-            return 0;
-        g_tried = true;
-        if (!have_entry_points()) {
-            DLOG("render", "gl_blit: no shader/buffer entry points — quad unavailable");
-            return 0;
-        }
-        if (!build_program())
-            return 0;
+// The quad and its program, built on first use and once only.
+bool ensure_quad() {
+    if (g_program != 0)
+        return true;
+    if (g_tried)
+        return false;
+    g_tried = true;
+    if (!have_entry_points()) {
+        DLOG("render", "gl_blit: no shader/buffer entry points — quad unavailable");
+        return false;
     }
+    return build_program();
+}
 
-    // Put back whatever the caller had. The scene-FBO seed runs mid-frame
-    // between the renderer's own draws, so anything left changed here lands
-    // directly on those draws.
+// Draws the quad with `program` and puts back whatever the caller had. The
+// scene-FBO seed runs mid-frame between the renderer's own draws, so anything
+// left changed here lands directly on those draws. `set_uniforms` gives the
+// program anything beyond its sampler.
+void draw_quad(GLuint program, GLint loc_tex, unsigned int texture, int first,
+               void (*set_uniforms)(const void *), const void *uniforms) {
     GLint prev_program = 0;
     GLint prev_array = 0;
     gl.GetIntegerv(GL_CURRENT_PROGRAM, &prev_program);
     gl.GetIntegerv(GL_VERTEX_ARRAY_BINDING, &prev_array);
 
-    gl.UseProgram(g_program);
+    gl.UseProgram(program);
     // After glUseProgram, never before: glUniform writes to the currently bound
     // program, and setting it earlier leaves the sampler at its default with no
     // error to show for it. The unit is 0, which is the one the caller bound the
     // texture on — nothing here calls glActiveTexture, and the fallback quad
     // assumes the same unit.
-    gl.Uniform1i(g_loc_tex, 0);
+    gl.Uniform1i(loc_tex, 0);
+    if (set_uniforms != nullptr)
+        set_uniforms(uniforms);
     gl.BindTexture(GL_TEXTURE_2D, (GLuint)texture);
 
     gl.BindVertexArray(g_vao);
@@ -368,39 +233,65 @@ int blit_quad(unsigned int texture, int first) {
 
     gl.BindVertexArray((GLuint)prev_array);
     gl.UseProgram((GLuint)prev_program);
+}
+
+int blit_quad(unsigned int texture, int first) {
+    if (!ensure_quad())
+        return 0;
+    draw_quad(g_program, g_loc_tex, texture, first, nullptr, nullptr);
     return 1;
 }
 
-int blit_quad_fsr(unsigned int texture, int first, int src_w, int src_h, float sharp) {
-    // The plain program owns the vertex buffer and array, so it has to exist first.
-    if (g_program == 0) {
-        if (g_tried) return 0;
-        g_tried = true;
-        if (!have_entry_points() || !build_program()) return 0;
+// An upscaler's program reads the plain quad's vertex array, which recorded
+// a_uv at the plain program's location. Only the position is pinned, so the
+// linker could put a_uv elsewhere here; drawing then would read the wrong
+// attribute, so such a program is refused rather than used.
+bool build_upscale_program(int mode, UpscaleProgram *out) {
+    const char *fragment = nocturne_upscale_fragment_source(mode);
+    if (fragment == nullptr)
+        return false;
+    if (gl.Uniform1f == nullptr || gl.Uniform2f == nullptr) {
+        DLOG("render", "gl_blit: no Uniform1f/Uniform2f — upscaler %d unavailable", mode);
+        return false;
     }
-    if (g_fsr_program == 0) {
-        if (g_fsr_tried) return 0;
-        g_fsr_tried = true;
-        if (!build_fsr_program()) return 0;
+    GLuint program = nocturne_gl_build_program(kVertexSource, fragment, "gl_blit_upscale");
+    if (program == 0) {
+        return false;
     }
+    if (gl.GetAttribLocation(program, "a_uv") != g_attr_uv) {
+        DLOG("render", "gl_blit: upscaler %d put a_uv elsewhere — unavailable", mode);
+        gl.DeleteProgram(program);
+        return false;
+    }
+    out->loc_tex = gl.GetUniformLocation(program, "u_tex");
+    out->loc_src = gl.GetUniformLocation(program, "u_src");
+    out->loc_sharp = gl.GetUniformLocation(program, "u_sharp");
+    out->program = program;
+    DLOG("render", "gl_blit: upscaler %d linked (id=%u)", mode, (unsigned)program);
+    return true;
+}
 
-    GLint prev_program = 0;
-    GLint prev_array   = 0;
-    gl.GetIntegerv(GL_CURRENT_PROGRAM, &prev_program);
-    gl.GetIntegerv(GL_VERTEX_ARRAY_BINDING, &prev_array);
+UpscaleProgram *ensure_upscale(int mode) {
+    if (mode < 0 || mode >= NOCTURNE_UPSCALER_COUNT)
+        return nullptr;
+    UpscaleProgram *up = &g_upscale[mode];
+    if (up->program != 0)
+        return up;
+    if (up->tried)
+        return nullptr;
+    up->tried = true;
+    return build_upscale_program(mode, up) ? up : nullptr;
+}
 
-    gl.UseProgram(g_fsr_program);
-    if (g_fsr_loc_tex >= 0) gl.Uniform1i(g_fsr_loc_tex, 0);
-    if (g_fsr_loc_src >= 0) gl.Uniform2f(g_fsr_loc_src, (GLfloat)src_w, (GLfloat)src_h);
-    if (g_fsr_loc_sharp >= 0) gl.Uniform1f(g_fsr_loc_sharp, sharp);
-    gl.BindTexture(GL_TEXTURE_2D, (GLuint)texture);
+struct UpscaleUniforms {
+    const UpscaleProgram *program;
+    GLfloat src_w, src_h, sharp;
+};
 
-    gl.BindVertexArray(g_vao);
-    draw_picture(first);
-
-    gl.BindVertexArray((GLuint)prev_array);
-    gl.UseProgram((GLuint)prev_program);
-    return 1;
+void set_upscale_uniforms(const void *uniforms) {
+    const UpscaleUniforms *u = (const UpscaleUniforms *)uniforms;
+    gl.Uniform2f(u->program->loc_src, u->src_w, u->src_h);
+    gl.Uniform1f(u->program->loc_sharp, u->sharp);
 }
 
 } // namespace
@@ -413,23 +304,32 @@ extern "C" int nocturne_gl_blit_quad_flipped(unsigned int texture) {
     return blit_quad(texture, kQuadBottomUp);
 }
 
-extern "C" int nocturne_gl_blit_quad_fsr(unsigned int texture, int flipped, int src_w, int src_h,
-                                         float sharpness) {
-    if (src_w < 2 || src_h < 2) return 0;
-    const float s = sharpness < 0.0f ? 0.0f : (sharpness > 1.0f ? 1.0f : sharpness);
-    // 0..1 from the launcher maps to RCAS stops 2..0: exp2(-2) = 0.25 up to exp2(0) = 1.0.
-    const float contrast = 0.25f + 0.75f * s * s;
-    return blit_quad_fsr(texture, flipped ? kQuadBottomUp : kQuadTopDown, src_w, src_h, contrast);
+// The plain quad first: its buffer and vertex array are the ones drawn.
+extern "C" int nocturne_gl_blit_quad_upscaled(int mode, unsigned int texture, int flipped,
+                                              int src_w, int src_h, float sharpness) {
+    if (!ensure_quad())
+        return 0;
+    const UpscaleProgram *up = ensure_upscale(mode);
+    if (up == nullptr)
+        return 0;
+    const UpscaleUniforms uniforms = {up, (GLfloat)src_w, (GLfloat)src_h, sharpness};
+    draw_quad(up->program, up->loc_tex, texture, flipped ? kQuadBottomUp : kQuadTopDown,
+              set_upscale_uniforms, &uniforms);
+    return 1;
 }
 
-extern "C" void nocturne_gl_blit_set_warp(int on) { g_warp = on != 0; }
+// Only a built program has anything to delete; a failed build leaves nothing.
+extern "C" void nocturne_gl_blit_set_warp(int on) {
+    g_warp = on != 0;
+}
 
-// Only a built quad has anything to delete; a failed build leaves nothing.
 extern "C" void nocturne_gl_blit_shutdown(void) {
-    if (g_fsr_program != 0 && gl.DeleteProgram != nullptr) gl.DeleteProgram(g_fsr_program);
-    g_fsr_program = 0;
-    g_fsr_tried   = false;
-    if (g_program != 0 && gl.DeleteProgram != nullptr) {
+    for (UpscaleProgram &up : g_upscale) {
+        if (up.program != 0)
+            gl.DeleteProgram(up.program);
+        up = UpscaleProgram();
+    }
+    if (g_program != 0) {
         gl.DeleteProgram(g_program);
         gl.DeleteBuffers(1, &g_vbo);
         gl.DeleteVertexArrays(1, &g_vao);
@@ -452,10 +352,18 @@ extern "C" int nocturne_gl_blit_quad_flipped(unsigned int t) {
     (void)t;
     return 0;
 }
-extern "C" void nocturne_gl_blit_set_warp(int on) { (void)on; }
-extern "C" int nocturne_gl_blit_quad_fsr(unsigned int t, int f, int w, int h, float s) {
-    (void)t; (void)f; (void)w; (void)h; (void)s;
+extern "C" int nocturne_gl_blit_quad_upscaled(int mode, unsigned int t, int flipped, int w, int h,
+                                              float s) {
+    (void)mode;
+    (void)t;
+    (void)flipped;
+    (void)w;
+    (void)h;
+    (void)s;
     return 0;
+}
+extern "C" void nocturne_gl_blit_set_warp(int on) {
+    (void)on;
 }
 extern "C" void nocturne_gl_blit_shutdown(void) {}
 

@@ -47,14 +47,18 @@ int nocturne_gl_blit_quad(unsigned int texture);
 // target presented with nocturne_gl_blit_quad would come out upside down.
 int nocturne_gl_blit_quad_flipped(unsigned int texture);
 
-// The same quad through an FSR-style upscaler (edge-aware upscale plus a contrast-adaptive
-// sharpen; see gl_blit.cpp). `src_w` x `src_h` is the texture's size in texels, `flipped`
-// samples it bottom-up, and `sharpness` runs 0.0 (soft) to 1.0 (strongest). The texture
-// should have GL_LINEAR filtering. Returns 0 when the program could not be built, so the
-// caller can fall back to nocturne_gl_blit_quad.
-int nocturne_gl_blit_quad_fsr(unsigned int texture, int flipped, int src_w, int src_h, float sharpness);
+// The same quad through upscaler `mode` (NOCTURNE_UPSCALER_*, gl/upscaler.h):
+// that filter's fragment program (gl/upscale_shaders.h) enlarges the `src_w` x
+// `src_h` texture onto the viewport, tuned by `sharpness`, 0 (soft) to 1
+// (strongest), where the filter sharpens. `flipped` samples it bottom-up. The
+// caller sets the texture's filter as nocturne_upscale_wants_nearest says.
+// Each filter's program is built on its first use; one that cannot be built, or
+// a mode with no program (Standard included), returns 0, for good, so the
+// caller can draw the plain quad instead.
+int nocturne_gl_blit_quad_upscaled(int mode, unsigned int texture, int flipped, int src_w,
+                                   int src_h, float sharpness);
 
-// While on, the two quads above (and the FSR one) are drawn as a bent strip for "smart stretch": the
+// While on, the quads above (plain or through an upscaler) are drawn as a bent strip for "smart stretch": the
 // middle of the screen close to true proportions, the sides stretched more. Only for the final present
 // to the window; the caller turns it off again straight after.
 void nocturne_gl_blit_set_warp(int on);
