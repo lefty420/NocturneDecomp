@@ -136,6 +136,26 @@ The recreation is a separate CMake project with its own script:
 
 Full prerequisites and the preset table are in **[docs/building.md](docs/building.md)**.
 
+## Xbox (UWP) port
+
+This fork also builds an Xbox Series X|S app that you sideload in Dev Mode through the Device Portal. It runs
+the decompiled game on the console, with a launcher in front of it. **No game data is included**: you add your
+own copy of Nocturne with the launcher's *Game files* tab.
+
+| | |
+|---|---|
+| ![Launcher, Play tab](docs/images/launcher-play.png) | ![Launcher, Graphics tab](docs/images/launcher-graphics.png) |
+
+What the launcher does: copies your game files in (and carries on if interrupted), controller feel
+(deadzone, turn and look speed, invert), and graphics options (4:3 / Widescreen / Stretch / Zoom, 1080p or 4K
+output, FSR upscaling with a sharpness slider). The box art and the claw marks in the header are read from your
+own game files, so the screenshots above show none. They are rendered from the launcher's test build, not
+captured on a console.
+
+How it is built and what has and has not been tested: [docs/xbox-uwp.md](docs/xbox-uwp.md) and the
+[change log](docs/xbox-uwp-changelog.md). Builds come from the `uwp-link` workflow. This is a community
+port, not an official release.
+
 ## Documentation
 
 **[docs/](docs/)** — how the project is built and worked on:
