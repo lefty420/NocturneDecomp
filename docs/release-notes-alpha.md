@@ -14,10 +14,19 @@ files in from its *Game files* tab.
 
 A new version installs over an old one and keeps your saves and settings.
 
+### Getting back to the launcher
+
+After you press **Play** once, the app starts straight into the game. To reopen the launcher (graphics, controls,
+game files), hold **View + Menu + left-stick click** together in the game. The app restarts and shows the launcher.
+B does not close the app; use **Start** to back out of the game's menus.
+
 ### What it has
 
 - Launcher: game-file import that resumes if interrupted, controller feel, and graphics options.
-- Graphics: 4:3 / Widescreen / Stretch / Zoom, 1080p or 4K output, FSR upscaling with a sharpness slider.
+- Screen shape: **4:3** (bars at the sides), **Widescreen** (edges stretched more than the middle), **Stretch**
+  (fills evenly) or **Zoom** (fills, trims the top and bottom).
+- Output: **1080p** or **4K** (3840x2160; only useful on a 4K TV).
+- **FSR upscaling** with a sharpness slider: scales the game's 640x480 picture up with cleaner edges than a plain stretch.
 - Your controls and graphics start from the author's defaults the first time (change them in the game as usual).
 - Based on the community decompilation by NearlyTRex (NocturneDecomp).
 
